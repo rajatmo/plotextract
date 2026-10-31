@@ -9,15 +9,12 @@ authors.workspace = true
 
 [dependencies]
 plotextract-core.workspace = true
-plotextract-pdf.workspace = true
-plotextract-ps.workspace = true
-plotextract-svg.workspace = true
+plotextract-workspace.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
 rfd.workspace = true
 clap.workspace = true
-serde_json.workspace = true
 kurbo.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

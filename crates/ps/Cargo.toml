@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 plotextract-core.workspace = true
+plotextract-import.workspace = true
 stet.workspace = true
 stet-fonts.workspace = true
 kurbo.workspace = true

@@ -5,6 +5,19 @@
 //! by the `PLOTEXTRACT_TESTDATA` environment variable. Without them the tests say so and pass.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use plotextract_core::{Figure, ImportError, Importer, OpenOptions, PictureSource};
+
+/// Read a figure with an importer, as the app does for page 1.
+pub fn import(importer: &dyn Importer, bytes: &[u8]) -> Result<Figure, ImportError> {
+    importer.import(&Arc::new(bytes.to_vec()), &OpenOptions::default())
+}
+
+/// A picture source of page 1.
+pub fn picture(importer: &dyn Importer, bytes: &[u8]) -> Option<Box<dyn PictureSource>> {
+    importer.picture(&Arc::new(bytes.to_vec()), &OpenOptions::default())
+}
 
 /// The folder with the generated figures.
 pub fn data_dir() -> PathBuf {

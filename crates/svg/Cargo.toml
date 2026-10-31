@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 plotextract-core.workspace = true
+plotextract-import.workspace = true
 usvg.workspace = true
 resvg.workspace = true
 kurbo.workspace = true

@@ -9,12 +9,14 @@ authors.workspace = true
 publish = false
 
 [dependencies]
+plotextract-core.workspace = true
 
 [dev-dependencies]
-plotextract-core.workspace = true
+plotextract-import.workspace = true
 plotextract-pdf.workspace = true
 plotextract-ps.workspace = true
 plotextract-svg.workspace = true
+plotextract-workspace.workspace = true
 kurbo.workspace = true
 serde.workspace = true
 serde_json.workspace = true

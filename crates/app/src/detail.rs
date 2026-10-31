@@ -1,13 +1,24 @@
-//! Sharp detail: when the view has stopped changing and shows more than the backdrop's resolution, the visible part of
-//! the page is re-rendered at the screen's resolution on a worker thread and laid over the backdrop.
+//! Pictures of the page, all drawn on a worker thread. The base picture covers the whole page. Sharp detail: when the
+//! view has stopped changing and shows more than the base picture's resolution, the visible part of the page is
+//! re-rendered at the screen's resolution and laid over the base picture.
 
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use kurbo::Rect;
-use plotextract_core::{Bitmap, Importer};
+use plotextract_core::Bitmap;
+use plotextract_workspace::Source;
 
-/// Only re-render when the screen shows more than this times the backdrop's resolution.
+/// Longest side of the base picture, in pixels.
+const BASE_MAX_PX: f64 = 4096.0;
+/// Most pixels per figure unit in the base picture.
+const BASE_MAX_SCALE: f64 = 6.0;
+
+/// Pixels per figure unit of the base picture of a page this size.
+pub fn base_scale(width: f64, height: f64) -> f64 {
+    (BASE_MAX_PX / width.max(height)).min(BASE_MAX_SCALE)
+}
+
+/// Only re-render when the screen shows more than this times the base picture's resolution.
 pub const DETAIL_ABOVE: f64 = 1.15;
 /// Cap on the size of one detail render, in pixels (48 MB of RGBA).
 pub const MAX_DETAIL_PIXELS: f64 = 12e6;
@@ -15,7 +26,7 @@ pub const MAX_DETAIL_PIXELS: f64 = 12e6;
 pub const MARGIN: f64 = 0.25;
 
 /// What to render for a view: the figure-space region and its scale in pixels per figure unit, or `None` when the
-/// backdrop is already sharp enough.
+/// base picture is already sharp enough.
 pub fn plan(visible: Rect, page: Rect, screen_scale: f64, base_scale: f64) -> Option<(Rect, f64)> {
     if screen_scale <= base_scale * DETAIL_ABOVE {
         return None;
@@ -49,20 +60,41 @@ pub fn covers(have: Rect, have_scale: f64, need: Rect, need_scale: f64) -> bool 
         && have_scale >= need_scale * 0.9
 }
 
+/// What a render is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// The whole page at a modest resolution: the picture that is always there.
+    Base,
+    /// The visible part at the screen's resolution, laid over the base.
+    Detail,
+}
+
 pub struct Request {
     pub id: u64,
+    pub kind: Kind,
     pub region: Rect,
     pub scale: f64,
 }
 
 pub struct Rendered {
     pub id: u64,
+    pub kind: Kind,
     pub region: Rect,
     pub scale: f64,
     pub bitmap: Bitmap,
 }
 
-/// A thread that owns the file's region renderer and answers requests, newest first. It ends when dropped.
+/// The newest of each kind, base first: what is stale is skipped.
+fn newest_per_kind<T>(items: impl IntoIterator<Item = T>, kind: impl Fn(&T) -> Kind) -> Vec<T> {
+    let mut latest: [Option<T>; 2] = [None, None];
+    for item in items {
+        let at = kind(&item) as usize;
+        latest[at] = Some(item);
+    }
+    latest.into_iter().flatten().collect()
+}
+
+/// A thread that owns the file's picture source and answers requests. It ends when dropped.
 pub struct Worker {
     requests: Sender<Request>,
     results: Receiver<Rendered>,
@@ -70,43 +102,42 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn spawn(ctx: egui::Context, importer: Arc<dyn Importer>, bytes: Arc<Vec<u8>>) -> Self {
+    pub fn spawn(ctx: egui::Context, source: Source) -> Self {
         let (requests, rx) = channel::<Request>();
         let (tx, results) = channel::<Rendered>();
         std::thread::spawn(move || {
-            let Some(mut renderer) = importer.region_renderer(&bytes) else { return };
-            while let Ok(mut req) = rx.recv() {
-                while let Ok(newer) = rx.try_recv() {
-                    req = newer; // the view has moved on: skip what is stale
-                }
-                match renderer.render(req.region, req.scale) {
-                    Ok(bitmap) => {
-                        if tx.send(Rendered { id: req.id, region: req.region, scale: req.scale, bitmap }).is_err() {
-                            return;
+            // created here: some renderers cannot move between threads
+            let Some(mut pictures) = source.picture() else { return };
+            while let Ok(first) = rx.recv() {
+                let queued = std::iter::once(first).chain(std::iter::from_fn(|| rx.try_recv().ok()));
+                for req in newest_per_kind(queued, |r| r.kind) {
+                    match pictures.render(req.region, req.scale) {
+                        Ok(bitmap) => {
+                            let done =
+                                Rendered { id: req.id, kind: req.kind, region: req.region, scale: req.scale, bitmap };
+                            if tx.send(done).is_err() {
+                                return;
+                            }
+                            ctx.request_repaint();
                         }
-                        ctx.request_repaint();
+                        Err(e) => tracing::warn!("render failed: {e}"),
                     }
-                    Err(e) => tracing::warn!("detail render failed: {e}"),
                 }
             }
         });
         Self { requests, results, next_id: 0 }
     }
 
-    /// Ask for a render; returns its id (only the newest id's result should be used).
-    pub fn request(&mut self, region: Rect, scale: f64) -> u64 {
+    /// Ask for a render; returns its id (a newer request of the same kind makes an older one stale).
+    pub fn request(&mut self, kind: Kind, region: Rect, scale: f64) -> u64 {
         self.next_id += 1;
-        let _ = self.requests.send(Request { id: self.next_id, region, scale });
+        let _ = self.requests.send(Request { id: self.next_id, kind, region, scale });
         self.next_id
     }
 
-    /// The newest finished render, if any.
-    pub fn poll(&self) -> Option<Rendered> {
-        let mut latest = None;
-        while let Ok(r) = self.results.try_recv() {
-            latest = Some(r);
-        }
-        latest
+    /// The finished renders, the newest of each kind.
+    pub fn poll_all(&self) -> Vec<Rendered> {
+        newest_per_kind(std::iter::from_fn(|| self.results.try_recv().ok()), |r| r.kind)
     }
 }
 
@@ -162,5 +193,21 @@ mod tests {
         assert!(covers(have, 40.0, Rect::new(100.0, 80.0, 140.0, 110.0), 43.0), "a little coarser is fine");
         assert!(!covers(have, 40.0, Rect::new(100.0, 80.0, 140.0, 110.0), 60.0), "zoomed in further");
         assert!(!covers(have, 40.0, Rect::new(80.0, 80.0, 140.0, 110.0), 40.0), "panned past its edge");
+    }
+
+    #[test]
+    fn the_base_picture_is_capped_by_size_and_by_scale() {
+        assert_eq!(base_scale(100.0, 50.0), 6.0, "small pages stop at the scale cap");
+        assert_eq!(base_scale(2000.0, 500.0), 2.048, "big pages are limited by the longest side");
+        assert_eq!(base_scale(500.0, 2000.0), 2.048);
+    }
+
+    #[test]
+    fn only_the_newest_request_of_each_kind_is_kept() {
+        let r = |id, kind| Request { id, kind, region: PAGE, scale: 1.0 };
+        let kept =
+            newest_per_kind([r(1, Kind::Detail), r(2, Kind::Base), r(3, Kind::Detail), r(4, Kind::Detail)], |r| r.kind);
+        assert_eq!(kept.iter().map(|r| r.id).collect::<Vec<_>>(), [2, 4], "base first, the last detail");
+        assert!(newest_per_kind(Vec::<Request>::new(), |r| r.kind).is_empty());
     }
 }

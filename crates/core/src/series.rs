@@ -15,15 +15,15 @@ pub struct Series {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
-    #[error("both axes must be calibrated first")]
+    #[error("no such series")]
+    NoSuchSeries,
+    #[error("both axes must be calibrated")]
     NotCalibrated,
     #[error("the series has no points")]
     Empty,
-    #[error(
-        "{bad} of {total} points map outside the range of representable numbers.\n\n\
-         The two reference points of an axis are probably too close together (especially on a log axis). \
-         Record reference ticks further apart."
-    )]
+    /// Points that map outside the range of representable numbers, typically because an axis's two reference ticks
+    /// are far too close together, especially on a log axis.
+    #[error("{bad} of {total} points map outside the range of representable numbers")]
     NonFinite { bad: usize, total: usize },
 }
 

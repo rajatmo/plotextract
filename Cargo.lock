@@ -3480,7 +3480,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "plotextract"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "eframe",
@@ -3488,11 +3488,8 @@ dependencies = [
  "egui_extras",
  "kurbo",
  "plotextract-core",
- "plotextract-pdf",
- "plotextract-ps",
- "plotextract-svg",
+ "plotextract-workspace",
  "rfd",
- "serde_json",
  "tracing",
  "tracing-subscriber",
  "winresource",
@@ -3500,7 +3497,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kurbo",
  "serde",
@@ -3510,42 +3507,54 @@ dependencies = [
 
 [[package]]
 name = "plotextract-corpus"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kurbo",
  "plotextract-core",
+ "plotextract-import",
  "plotextract-pdf",
  "plotextract-ps",
  "plotextract-svg",
+ "plotextract-workspace",
  "serde",
  "serde_json",
 ]
 
 [[package]]
+name = "plotextract-import"
+version = "0.2.0"
+dependencies = [
+ "kurbo",
+ "plotextract-core",
+]
+
+[[package]]
 name = "plotextract-pdf"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hayro",
  "hayro-interpret",
  "hayro-syntax",
  "kurbo",
  "plotextract-core",
+ "plotextract-import",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "plotextract-ps"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kurbo",
  "plotextract-core",
+ "plotextract-import",
  "stet",
  "stet-fonts",
 ]
 
 [[package]]
 name = "plotextract-raster"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "image",
  "imageproc",
@@ -3558,12 +3567,26 @@ dependencies = [
 
 [[package]]
 name = "plotextract-svg"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kurbo",
  "plotextract-core",
+ "plotextract-import",
  "resvg",
  "usvg",
+]
+
+[[package]]
+name = "plotextract-workspace"
+version = "0.2.0"
+dependencies = [
+ "kurbo",
+ "plotextract-core",
+ "plotextract-pdf",
+ "plotextract-ps",
+ "plotextract-svg",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

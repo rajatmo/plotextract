@@ -1,5 +1,5 @@
 //! Accuracy on real plots: matplotlib and Mathematica figures (see the corpus crate's `lib.rs` for where they live), each as PDF, SVG and EPS, are opened,
-//! calibrated from their tick marks and have their series extracted through the same `Session` commands the app uses.
+//! calibrated from their tick marks and have their series extracted through the same `Session` calls the app uses.
 //! The recovered numbers are compared with the data that drew the plot.
 //!
 //! matplotlib figures state where every tick landed on the page (in points), which is independent of the importers; an
@@ -7,11 +7,9 @@
 //! figures state the tick values; their positions are found from the tick marks and the frame lines in the file.
 
 use kurbo::Point;
-use plotextract_core::{Axis, Command, Figure, Importer, Pick, PrimitiveKind, Session, Slot};
+use plotextract_core::{Axis, Edit, Figure, Pick, PrimitiveKind, Session, Slot};
 use plotextract_corpus::fixture;
-use plotextract_pdf::PdfImporter;
-use plotextract_ps::PsImporter;
-use plotextract_svg::SvgImporter;
+use plotextract_workspace::Registry;
 use serde::Deserialize;
 
 // --- ground truth files --------------------------------------------------------------------------
@@ -93,11 +91,10 @@ struct AxisSetup {
 /// The figure in a generated file, or `None` when the test data is not available.
 fn open(rel: &str) -> Option<Figure> {
     let bytes = fixture(rel)?;
-    let importers: [&dyn Importer; 3] = [&PdfImporter, &SvgImporter, &PsImporter];
-    let head = &bytes[..bytes.len().min(1024)];
+    let extension = rel.rsplit('.').next();
     let importer =
-        importers.into_iter().find(|i| i.sniff(head)).unwrap_or_else(|| panic!("{rel}: no importer recognizes it"));
-    Some(importer.import(bytes).unwrap_or_else(|e| panic!("{rel}: {e}")))
+        Registry::standard().detect(&bytes, extension).unwrap_or_else(|| panic!("{rel}: no importer recognizes it"));
+    Some(plotextract_corpus::import(&*importer, &bytes).unwrap_or_else(|e| panic!("{rel}: {e}")))
 }
 
 fn json<T: for<'de> Deserialize<'de>>(rel: &str) -> T {
@@ -194,20 +191,19 @@ fn mathematica_setup(name: &str, figure: &Figure) -> AxisSetup {
 
 /// Record the tick at page position `at` (found by snapping, as the user would) into `slot` with its value.
 fn record_tick(s: &mut Session, label: &str, near: Point, along_x: bool, slot: Slot, value: f64) {
-    let hit = s
-        .snap_vertex(near, 4.0)
-        .unwrap_or_else(|| panic!("{label}: no vertex near the {} tick at {near:?}", slot.label()));
+    let hit =
+        s.snap_vertex(near, 4.0).unwrap_or_else(|| panic!("{label}: no vertex near the {slot:?} tick at {near:?}"));
     let (got, want) = if along_x { (hit.pos.x, near.x) } else { (hit.pos.y, near.y) };
-    assert!((got - want).abs() < 0.15, "{label}: {} tick snapped {got} but sits at {want}", slot.label());
-    s.apply(Command::Select(Some(Pick { primitive: hit.primitive, vertex: Some(hit.vertex) }))).unwrap();
-    s.apply(Command::RecordSelected(slot)).unwrap();
-    s.apply(Command::SetValue(slot, Some(value))).unwrap();
+    assert!((got - want).abs() < 0.15, "{label}: {slot:?} tick snapped {got} but sits at {want}");
+    s.select(Some(Pick { primitive: hit.primitive, vertex: Some(hit.vertex) })).unwrap();
+    s.record_selected(slot).unwrap();
+    s.edit(Edit::SetValue(slot, Some(value))).unwrap();
 }
 
 fn calibrate(s: &mut Session, setup: &AxisSetup) {
-    s.apply(Command::ClearCalibration).unwrap();
-    s.apply(Command::SetLog(Axis::X, setup.x_log)).unwrap();
-    s.apply(Command::SetLog(Axis::Y, setup.y_log)).unwrap();
+    s.edit(Edit::ClearCalibration).unwrap();
+    s.edit(Edit::SetLog(Axis::X, setup.x_log)).unwrap();
+    s.edit(Edit::SetLog(Axis::Y, setup.y_log)).unwrap();
     let l = &setup.label;
     let (x0, x1) = (setup.x_ticks[0], *setup.x_ticks.last().unwrap());
     let (y0, y1) = (setup.y_ticks[0], *setup.y_ticks.last().unwrap());
@@ -290,9 +286,9 @@ fn check_axes(s: &mut Session, setup: &AxisSetup) -> Vec<(String, f64)> {
         let label = format!("{} / {}", setup.label, t.name);
         let ids = members(s, setup, t);
         assert!(!ids.is_empty(), "{label}: no primitive of colour {:?} found", t.color);
-        s.apply(Command::NewSeries).unwrap();
+        s.edit(Edit::NewSeries).unwrap();
         for &m in &ids {
-            s.apply(Command::ToggleMember(m)).unwrap();
+            s.edit(Edit::ToggleMember(m)).unwrap();
         }
         let series = s.active_series().unwrap();
         let (xs, ys) = (span(&t.x, setup.x_log), span(&t.y, setup.y_log));

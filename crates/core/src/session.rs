@@ -1,171 +1,191 @@
-//! The document state machine: everything the user does with a figure, changed only by commands.
+//! A session: one figure being worked on. It keeps the three things a session consists of apart and coordinates them:
+//! the [`Document`] (what the user builds, saved in a project), the [`History`] that undoes it, and the [`ViewState`]
+//! (layers and selection, neither saved nor undone), plus the spatial index over the figure.
 
 use kurbo::Point;
-use serde::{Deserialize, Serialize};
 
-use crate::{Axis, Calibration, ExportError, Figure, Hit, Primitive, PrimitiveKind, Series, Slot, SnapIndex};
-
-/// A layer that can be shown or hidden as a whole.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Layer {
-    Strokes,
-    Fills,
-    Page,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Layers {
-    pub strokes: bool,
-    pub fills: bool,
-    pub page: bool,
-}
-
-/// The selected primitive and, if a click snapped to one, its vertex.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Pick {
-    pub primitive: usize,
-    pub vertex: Option<usize>,
-}
-
-#[derive(Clone, Debug)]
-pub enum Command {
-    Select(Option<Pick>),
-    SetHidden(usize, bool),
-    SetLayer(Layer, bool),
-    /// Store the selected point's coordinate in a calibration slot.
-    RecordSelected(Slot),
-    SetValue(Slot, Option<f64>),
-    SetLog(Axis, bool),
-    ClearCalibration,
-    NewSeries,
-    DeleteSeries(usize),
-    RenameSeries(usize, String),
-    SetActiveSeries(usize),
-    /// Add a primitive to the active series (creating one if there is none), or remove it if already a member.
-    ToggleMember(usize),
-    ClearSeries(usize),
-    SetSortByX(usize, bool),
-}
+use crate::{
+    Calibration, Document, Edit, EditError, ExportError, Figure, History, Hit, Layer, Layers, Pick, Primitive, Project,
+    Series, Slot, SnapIndex, ViewState,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
-    #[error("Select a point first (Ctrl+click on a curve): the point it snaps to is what gets recorded.")]
+    #[error("no point is selected")]
     NoPointSelected,
-    #[error("that curve is hidden")]
+    #[error("the curve is hidden")]
     Hidden,
-    #[error("no such primitive or series")]
+    #[error("no such curve")]
     OutOfRange,
+    #[error(transparent)]
+    Edit(#[from] EditError),
     #[error(transparent)]
     Export(#[from] ExportError),
 }
 
-/// What undo restores.
-#[derive(Clone)]
-struct Snapshot {
-    calibration: Calibration,
-    series: Vec<Series>,
-    active: Option<usize>,
-    hidden: Vec<bool>,
-}
-
-/// The saved part of a session; the figure itself is reloaded from `source`.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct Project {
-    pub version: u32,
-    pub source: Option<String>,
-    pub calibration: Calibration,
-    pub series: Vec<Series>,
-    pub hidden: Vec<usize>,
-}
+const UNDO_LIMIT: usize = 200;
 
 pub struct Session {
     pub figure: Figure,
+    /// Where the figure was loaded from, as the user gave it.
     pub source: Option<String>,
-    calibration: Calibration,
-    series: Vec<Series>,
-    active: Option<usize>,
-    hidden: Vec<bool>,
-    layers: Layers,
-    visible: Vec<bool>,
-    selection: Option<Pick>,
+    document: Document,
+    history: History<Document>,
+    view: ViewState,
     index: SnapIndex,
-    undo: Vec<Snapshot>,
-    redo: Vec<Snapshot>,
 }
-
-const UNDO_LIMIT: usize = 200;
 
 impl Session {
     pub fn new(figure: Figure, source: Option<String>) -> Self {
-        let n = figure.primitives.len();
         let index = SnapIndex::new(&figure.primitives);
-        let mut s = Self {
-            figure,
-            source,
-            calibration: Calibration::default(),
-            series: Vec::new(),
-            active: None,
-            hidden: vec![false; n],
-            layers: Layers { strokes: true, fills: true, page: true },
-            visible: vec![true; n],
-            selection: None,
-            index,
-            undo: Vec::new(),
-            redo: Vec::new(),
-        };
-        s.refresh_visible();
-        s
+        let document = Document::new(figure.primitives.len());
+        Self { figure, source, document, history: History::new(UNDO_LIMIT), view: ViewState::default(), index }
     }
 
-    // --- reading -------------------------------------------------------------------------------
+    // --- the document --------------------------------------------------------------------------
 
     pub fn calibration(&self) -> &Calibration {
-        &self.calibration
+        self.document.calibration()
     }
 
     pub fn series(&self) -> &[Series] {
-        &self.series
+        self.document.series()
     }
 
     pub fn active_series(&self) -> Option<usize> {
-        self.active
-    }
-
-    pub fn layers(&self) -> Layers {
-        self.layers
+        self.document.active_series()
     }
 
     pub fn is_hidden(&self, primitive: usize) -> bool {
-        self.hidden[primitive]
+        self.document.is_hidden(primitive)
+    }
+
+    pub fn can_export(&self) -> bool {
+        self.document.can_export()
+    }
+
+    pub fn csv(&self, series: usize) -> Result<String, SessionError> {
+        Ok(self.document.csv(series, &self.figure.primitives)?)
+    }
+
+    /// Change the document. The change can be undone; a curve it hides stops being selected.
+    pub fn edit(&mut self, edit: Edit) -> Result<(), SessionError> {
+        let before = self.document.clone();
+        self.document.apply(edit)?;
+        self.history.record(before);
+        self.drop_hidden_selection();
+        Ok(())
+    }
+
+    /// Store the selected point's coordinate in a calibration slot.
+    pub fn record_selected(&mut self, slot: Slot) -> Result<(), SessionError> {
+        let point = self.selected_point().ok_or(SessionError::NoPointSelected)?;
+        self.edit(Edit::RecordPoint(slot, point))
+    }
+
+    /// Whether the user has changed anything: an edit that can be undone, or one that was undone.
+    pub fn has_work(&self) -> bool {
+        self.history.can_undo() || self.history.can_redo()
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.history.undo(&self.document) else { return false };
+        self.document = previous;
+        self.drop_hidden_selection();
+        true
+    }
+
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.history.redo(&self.document) else { return false };
+        self.document = next;
+        self.drop_hidden_selection();
+        true
+    }
+
+    pub fn project(&self) -> Project {
+        self.document.to_project(self.source.clone(), self.figure.page)
+    }
+
+    /// Restore a saved project onto this session's figure. Undo history and selection start afresh.
+    pub fn load_project(&mut self, project: Project) {
+        self.document.load_project(project);
+        self.history.clear();
+        self.view.selection = None;
+    }
+
+    // --- the view ------------------------------------------------------------------------------
+
+    pub fn layers(&self) -> Layers {
+        self.view.layers
+    }
+
+    pub fn set_layer(&mut self, layer: Layer, on: bool) {
+        self.view.layers.set(layer, on);
+        self.drop_hidden_selection();
+    }
+
+    pub fn selection(&self) -> Option<Pick> {
+        self.view.selection
+    }
+
+    /// Select a curve (and maybe one of its points), or nothing. A hidden curve cannot be selected.
+    pub fn select(&mut self, pick: Option<Pick>) -> Result<(), SessionError> {
+        if let Some(pick) = pick {
+            if pick.primitive >= self.figure.primitives.len() {
+                return Err(SessionError::OutOfRange);
+            }
+            if !self.is_visible(pick.primitive) {
+                return Err(SessionError::Hidden);
+            }
+        }
+        self.view.selection = pick;
+        Ok(())
     }
 
     /// Whether a primitive is drawn, snapped to and selectable.
     pub fn is_visible(&self, primitive: usize) -> bool {
-        self.visible[primitive]
-    }
-
-    pub fn selection(&self) -> Option<Pick> {
-        self.selection
+        !self.document.is_hidden(primitive) && self.view.layers.shows(self.figure.primitives[primitive].kind)
     }
 
     pub fn selected_primitive(&self) -> Option<&Primitive> {
-        self.selection.map(|p| &self.figure.primitives[p.primitive])
+        self.view.selection.map(|p| &self.figure.primitives[p.primitive])
     }
 
     /// The selected point in figure coordinates.
     pub fn selected_point(&self) -> Option<Point> {
-        let pick = self.selection?;
+        let pick = self.view.selection?;
         Some(self.figure.primitives[pick.primitive].points[pick.vertex?])
     }
 
+    fn drop_hidden_selection(&mut self) {
+        if self.view.selection.is_some_and(|p| !self.is_visible(p.primitive)) {
+            self.view.selection = None;
+        }
+    }
+
+    // --- looking things up ---------------------------------------------------------------------
+
     /// Plot values of a figure point, once both axes are calibrated.
     pub fn plot_coords(&self, p: Point) -> Option<(f64, f64)> {
-        let (xm, ym) = self.calibration.maps()?;
+        let (xm, ym) = self.calibration().maps()?;
         Some((xm.apply(p.x), ym.apply(p.y)))
     }
 
+    /// A box that holds all of a primitive's vertices (a little larger than needed). Cheap, unlike measuring it.
+    pub fn bounds(&self, primitive: usize) -> kurbo::Rect {
+        self.index.bounds(primitive)
+    }
+
     pub fn snap_vertex(&self, at: Point, radius: f64) -> Option<Hit> {
-        self.index.nearest_vertex(&self.figure.primitives, &self.visible, at, radius)
+        self.index.nearest_vertex(&self.figure.primitives, |k| self.is_visible(k), at, radius)
     }
 
     /// What a click at `at` would select: the vertex within `vertex_radius`, else a line within `line_radius`.
@@ -173,212 +193,16 @@ impl Session {
         if let Some(h) = self.snap_vertex(at, vertex_radius) {
             return Some(Pick { primitive: h.primitive, vertex: Some(h.vertex) });
         }
-        self.index.nearest_primitive(&self.visible, at, line_radius).map(|primitive| Pick { primitive, vertex: None })
-    }
-
-    pub fn can_export(&self) -> bool {
-        self.calibration.is_calibrated() && self.active.is_some_and(|a| !self.series[a].members.is_empty())
-    }
-
-    pub fn csv(&self, series: usize) -> Result<String, SessionError> {
-        let s = self.series.get(series).ok_or(SessionError::OutOfRange)?;
-        Ok(s.to_csv(&self.figure.primitives, &self.calibration)?)
-    }
-
-    // --- changing ------------------------------------------------------------------------------
-
-    pub fn apply(&mut self, command: Command) -> Result<(), SessionError> {
-        let n = self.figure.primitives.len();
-        match &command {
-            Command::Select(Some(pick)) => {
-                if pick.primitive >= n {
-                    return Err(SessionError::OutOfRange);
-                }
-                if !self.visible[pick.primitive] {
-                    return Err(SessionError::Hidden);
-                }
-            }
-            Command::SetHidden(p, _) | Command::ToggleMember(p) if *p >= n => return Err(SessionError::OutOfRange),
-            Command::DeleteSeries(i)
-            | Command::RenameSeries(i, _)
-            | Command::SetActiveSeries(i)
-            | Command::ClearSeries(i)
-            | Command::SetSortByX(i, _)
-                if *i >= self.series.len() =>
-            {
-                return Err(SessionError::OutOfRange);
-            }
-            Command::RecordSelected(_) if self.selected_point().is_none() => return Err(SessionError::NoPointSelected),
-            _ => {}
-        }
-        let undoable = !matches!(command, Command::Select(_) | Command::SetLayer(..));
-        let before = undoable.then(|| self.snapshot());
-        self.execute(command);
-        if let Some(before) = before {
-            self.undo.push(before);
-            if self.undo.len() > UNDO_LIMIT {
-                self.undo.remove(0);
-            }
-            self.redo.clear();
-        }
-        Ok(())
-    }
-
-    fn execute(&mut self, command: Command) {
-        match command {
-            Command::Select(pick) => self.selection = pick,
-            Command::SetHidden(p, hidden) => {
-                self.hidden[p] = hidden;
-                self.refresh_visible();
-            }
-            Command::SetLayer(layer, on) => {
-                match layer {
-                    Layer::Strokes => self.layers.strokes = on,
-                    Layer::Fills => self.layers.fills = on,
-                    Layer::Page => self.layers.page = on,
-                }
-                self.refresh_visible();
-            }
-            Command::RecordSelected(slot) => {
-                let p = self.selected_point().expect("checked in apply");
-                let axis = self.calibration.axis_mut(slot.axis());
-                axis.pos[slot.which()] = Some(if slot.axis() == Axis::X { p.x } else { p.y });
-            }
-            Command::SetValue(slot, v) => self.calibration.axis_mut(slot.axis()).value[slot.which()] = v,
-            Command::SetLog(axis, log) => self.calibration.axis_mut(axis).log = log,
-            Command::ClearCalibration => self.calibration = Calibration::default(),
-            Command::NewSeries => {
-                self.series.push(Series::new(format!("Series {}", self.series.len() + 1)));
-                self.active = Some(self.series.len() - 1);
-            }
-            Command::DeleteSeries(i) => {
-                self.series.remove(i);
-                self.active = match self.active {
-                    _ if self.series.is_empty() => None,
-                    Some(a) if a > i => Some(a - 1),
-                    Some(a) if a == i => Some(i.min(self.series.len() - 1)),
-                    other => other,
-                };
-            }
-            Command::RenameSeries(i, name) => self.series[i].name = name,
-            Command::SetActiveSeries(i) => self.active = Some(i),
-            Command::ToggleMember(p) => {
-                if self.active.is_none() {
-                    self.execute(Command::NewSeries);
-                }
-                let members = &mut self.series[self.active.expect("a series exists")].members;
-                match members.iter().position(|&m| m == p) {
-                    Some(at) => {
-                        members.remove(at);
-                    }
-                    None => members.push(p),
-                }
-            }
-            Command::ClearSeries(i) => self.series[i].members.clear(),
-            Command::SetSortByX(i, on) => self.series[i].sort_by_x = on,
-        }
-        // A hidden primitive cannot stay selected.
-        if self.selection.is_some_and(|p| !self.visible[p.primitive]) {
-            self.selection = None;
-        }
-    }
-
-    fn refresh_visible(&mut self) {
-        let layers = self.layers;
-        self.visible = self
-            .figure
-            .primitives
-            .iter()
-            .zip(&self.hidden)
-            .map(|(p, &hidden)| {
-                !hidden
-                    && match p.kind {
-                        PrimitiveKind::Stroke => layers.strokes,
-                        PrimitiveKind::Fill => layers.fills,
-                    }
-            })
-            .collect();
-    }
-
-    // --- undo ----------------------------------------------------------------------------------
-
-    fn snapshot(&self) -> Snapshot {
-        Snapshot {
-            calibration: self.calibration.clone(),
-            series: self.series.clone(),
-            active: self.active,
-            hidden: self.hidden.clone(),
-        }
-    }
-
-    fn restore(&mut self, s: Snapshot) {
-        self.calibration = s.calibration;
-        self.series = s.series;
-        self.active = s.active;
-        self.hidden = s.hidden;
-        self.refresh_visible();
-        if self.selection.is_some_and(|p| !self.visible[p.primitive]) {
-            self.selection = None;
-        }
-    }
-
-    pub fn can_undo(&self) -> bool {
-        !self.undo.is_empty()
-    }
-
-    pub fn can_redo(&self) -> bool {
-        !self.redo.is_empty()
-    }
-
-    pub fn undo(&mut self) -> bool {
-        let Some(previous) = self.undo.pop() else { return false };
-        self.redo.push(self.snapshot());
-        self.restore(previous);
-        true
-    }
-
-    pub fn redo(&mut self) -> bool {
-        let Some(next) = self.redo.pop() else { return false };
-        self.undo.push(self.snapshot());
-        self.restore(next);
-        true
-    }
-
-    // --- projects ------------------------------------------------------------------------------
-
-    pub fn project(&self) -> Project {
-        Project {
-            version: 1,
-            source: self.source.clone(),
-            calibration: self.calibration.clone(),
-            series: self.series.clone(),
-            hidden: self.hidden.iter().enumerate().filter(|&(_, &h)| h).map(|(i, _)| i).collect(),
-        }
-    }
-
-    /// Restore a saved project onto this session's figure. Out-of-range references are dropped.
-    pub fn load_project(&mut self, project: Project) {
-        let n = self.figure.primitives.len();
-        self.hidden = vec![false; n];
-        for i in project.hidden.into_iter().filter(|&i| i < n) {
-            self.hidden[i] = true;
-        }
-        self.calibration = project.calibration;
-        self.series = project.series;
-        for s in &mut self.series {
-            s.members.retain(|&m| m < n);
-        }
-        self.active = if self.series.is_empty() { None } else { Some(0) };
-        self.selection = None;
-        self.undo.clear();
-        self.redo.clear();
-        self.refresh_visible();
+        self.index
+            .nearest_primitive(&self.figure.primitives, |k| self.is_visible(k), at, line_radius)
+            .map(|primitive| Pick { primitive, vertex: None })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Axis, PrimitiveKind, Unit};
 
     fn figure() -> Figure {
         let line = |kind, index, pts: &[(f64, f64)]| {
@@ -387,7 +211,10 @@ mod tests {
         Figure {
             width: 100.0,
             height: 100.0,
-            backdrop: None,
+            unit: Unit::Point,
+            page: 0,
+            page_count: 1,
+            truncated: false,
             primitives: vec![
                 line(PrimitiveKind::Stroke, 0, &[(10.0, 90.0), (60.0, 40.0), (90.0, 10.0)]),
                 line(PrimitiveKind::Stroke, 1, &[(10.0, 10.0), (90.0, 90.0)]),
@@ -397,7 +224,7 @@ mod tests {
     }
 
     fn select_vertex(s: &mut Session, primitive: usize, vertex: usize) {
-        s.apply(Command::Select(Some(Pick { primitive, vertex: Some(vertex) }))).unwrap();
+        s.select(Some(Pick { primitive, vertex: Some(vertex) })).unwrap();
     }
 
     #[test]
@@ -408,14 +235,14 @@ mod tests {
             [(0, 0, Slot::XMin, 0.0), (0, 2, Slot::XMax, 8.0), (0, 0, Slot::YMin, 0.0), (0, 2, Slot::YMax, 8.0)]
         {
             select_vertex(&mut s, primitive, vertex);
-            s.apply(Command::RecordSelected(slot)).unwrap();
-            s.apply(Command::SetValue(slot, Some(value))).unwrap();
+            s.record_selected(slot).unwrap();
+            s.edit(Edit::SetValue(slot, Some(value))).unwrap();
         }
         assert!(s.calibration().is_calibrated());
         assert_eq!(s.plot_coords(Point::new(60.0, 40.0)), Some((5.0, 5.0)));
 
         assert!(!s.can_export());
-        s.apply(Command::ToggleMember(0)).unwrap(); // creates "Series 1"
+        s.edit(Edit::ToggleMember(0)).unwrap(); // creates "Series 1"
         assert_eq!(s.series()[0].name, "Series 1");
         assert!(s.can_export());
         assert_eq!(s.csv(0).unwrap(), "x,y\n0,0\n5,5\n8,8\n");
@@ -424,32 +251,35 @@ mod tests {
     #[test]
     fn recording_needs_a_selected_point() {
         let mut s = Session::new(figure(), None);
-        assert!(matches!(s.apply(Command::RecordSelected(Slot::XMin)), Err(SessionError::NoPointSelected)));
-        s.apply(Command::Select(Some(Pick { primitive: 0, vertex: None }))).unwrap(); // a curve, not a point
-        assert!(matches!(s.apply(Command::RecordSelected(Slot::XMin)), Err(SessionError::NoPointSelected)));
+        assert!(matches!(s.record_selected(Slot::XMin), Err(SessionError::NoPointSelected)));
+        s.select(Some(Pick { primitive: 0, vertex: None })).unwrap(); // a curve, not a point
+        assert!(matches!(s.record_selected(Slot::XMin), Err(SessionError::NoPointSelected)));
+        assert_eq!(s.calibration().position(Slot::XMin), None);
     }
 
     #[test]
-    fn hidden_primitives_cannot_be_selected_or_picked() {
+    fn hidden_curves_cannot_be_selected_or_picked() {
         let mut s = Session::new(figure(), None);
         select_vertex(&mut s, 0, 1);
-        s.apply(Command::SetHidden(0, true)).unwrap();
-        assert_eq!(s.selection(), None);
-        assert!(matches!(
-            s.apply(Command::Select(Some(Pick { primitive: 0, vertex: None }))),
-            Err(SessionError::Hidden)
-        ));
+        s.edit(Edit::SetHidden(0, true)).unwrap();
+        assert_eq!(s.selection(), None, "hiding the selected curve deselects it");
+        assert!(matches!(s.select(Some(Pick { primitive: 0, vertex: None })), Err(SessionError::Hidden)));
         assert_eq!(s.pick_at(Point::new(60.0, 40.0), 3.0, 2.0), None);
-        s.apply(Command::SetHidden(0, false)).unwrap();
+        s.edit(Edit::SetHidden(0, false)).unwrap();
         assert_eq!(s.pick_at(Point::new(60.5, 40.0), 3.0, 2.0), Some(Pick { primitive: 0, vertex: Some(1) }));
+        assert!(matches!(s.select(Some(Pick { primitive: 9, vertex: None })), Err(SessionError::OutOfRange)));
     }
 
     #[test]
-    fn layers_hide_by_kind() {
+    fn layers_hide_by_kind_and_are_not_undoable() {
         let mut s = Session::new(figure(), None);
-        s.apply(Command::SetLayer(Layer::Fills, false)).unwrap();
+        select_vertex(&mut s, 2, 0);
+        s.set_layer(Layer::Fills, false);
         assert!(s.is_visible(0) && !s.is_visible(2));
-        assert!(!s.can_undo(), "layer toggles are view state, not undoable edits");
+        assert_eq!(s.selection(), None, "a layer that hides the selected curve deselects it");
+        assert!(!s.can_undo(), "layer toggles are view state, not edits");
+        s.set_layer(Layer::Fills, true);
+        assert!(s.is_visible(2));
     }
 
     #[test]
@@ -460,39 +290,56 @@ mod tests {
     }
 
     #[test]
-    fn undo_and_redo_restore_edits() {
+    fn undo_and_redo_restore_edits_but_not_the_selection() {
         let mut s = Session::new(figure(), None);
-        s.apply(Command::ToggleMember(0)).unwrap();
-        s.apply(Command::ToggleMember(1)).unwrap();
+        s.edit(Edit::ToggleMember(0)).unwrap();
+        s.edit(Edit::ToggleMember(1)).unwrap();
+        select_vertex(&mut s, 1, 0);
         assert_eq!(s.series()[0].members, vec![0, 1]);
         assert!(s.undo());
         assert_eq!(s.series()[0].members, vec![0]);
+        assert_eq!(s.selection().map(|p| p.primitive), Some(1), "selecting is not an edit, so undo leaves it");
         assert!(s.undo());
         assert!(s.series().is_empty());
         assert!(!s.undo());
         assert!(s.redo() && s.redo());
         assert_eq!(s.series()[0].members, vec![0, 1]);
-        s.apply(Command::ToggleMember(1)).unwrap(); // toggling again removes it
+        s.edit(Edit::ToggleMember(1)).unwrap(); // toggling again removes it
         assert_eq!(s.series()[0].members, vec![0]);
+        assert!(!s.can_redo());
     }
 
     #[test]
-    fn projects_round_trip_through_json() {
+    fn undoing_a_hide_after_selecting_elsewhere_keeps_the_selection_valid() {
+        let mut s = Session::new(figure(), None);
+        s.edit(Edit::SetHidden(1, true)).unwrap();
+        select_vertex(&mut s, 0, 0);
+        s.undo(); // the hide goes away: curve 1 is visible again, curve 0 was never hidden
+        assert_eq!(s.selection().map(|p| p.primitive), Some(0));
+        s.redo(); // hidden again: whatever is selected must still be visible
+        assert!(s.selection().is_none_or(|p| s.is_visible(p.primitive)));
+    }
+
+    #[test]
+    fn projects_load_onto_a_session_and_reset_history_and_selection() {
         let mut s = Session::new(figure(), Some("fig.pdf".into()));
         select_vertex(&mut s, 0, 0);
-        s.apply(Command::RecordSelected(Slot::XMin)).unwrap();
-        s.apply(Command::SetValue(Slot::XMin, Some(1.5))).unwrap();
-        s.apply(Command::SetLog(Axis::Y, true)).unwrap();
-        s.apply(Command::ToggleMember(1)).unwrap();
-        s.apply(Command::SetHidden(2, true)).unwrap();
-        let json = serde_json::to_string(&s.project()).unwrap();
+        s.record_selected(Slot::XMin).unwrap();
+        s.edit(Edit::SetValue(Slot::XMin, Some(1.5))).unwrap();
+        s.edit(Edit::SetLog(Axis::Y, true)).unwrap();
+        s.edit(Edit::ToggleMember(1)).unwrap();
+        s.edit(Edit::SetHidden(2, true)).unwrap();
+        let project = s.project();
+        assert_eq!(project.source.as_deref(), Some("fig.pdf"));
 
         let mut fresh = Session::new(figure(), None);
-        fresh.load_project(serde_json::from_str(&json).unwrap());
+        select_vertex(&mut fresh, 1, 0);
+        fresh.edit(Edit::NewSeries).unwrap();
+        fresh.load_project(project);
         assert_eq!(fresh.calibration(), s.calibration());
         assert_eq!(fresh.series(), s.series());
         assert!(fresh.is_hidden(2) && !fresh.is_hidden(0));
-        assert_eq!(s.project().source, Some("fig.pdf".into()));
-        assert!(json.contains("fig.pdf"));
+        assert_eq!(fresh.selection(), None);
+        assert!(!fresh.can_undo());
     }
 }

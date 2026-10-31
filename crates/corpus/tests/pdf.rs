@@ -1,8 +1,18 @@
 //! The sin plot made by Mathematica, checked against what the Python prototype extracted from it.
 
-use plotextract_core::{Importer, PrimitiveKind};
-use plotextract_corpus::fixture;
-use plotextract_pdf::{BEZIER_STEPS, PdfImporter, extract};
+use kurbo::Rect;
+use plotextract_core::{Bitmap, Figure, Importer, PrimitiveKind, Unit};
+use plotextract_corpus::{fixture, import, picture};
+use plotextract_import::BEZIER_STEPS;
+use plotextract_pdf::{PdfImporter, extract};
+
+/// Pixels per point of the reference picture.
+const K: f64 = 6.0;
+
+fn whole_page(pdf: &[u8], figure: &Figure) -> Bitmap {
+    let mut picture = picture(&PdfImporter, pdf).expect("PDF draws pictures");
+    picture.render(Rect::new(0.0, 0.0, figure.width, figure.height), K).unwrap()
+}
 
 #[test]
 fn page_size_and_curve_counts() {
@@ -36,13 +46,15 @@ fn importer_recognizes_pdf_only() {
     let Some(sin) = fixture("sin_mathematica.pdf") else { return };
     assert!(PdfImporter.sniff(&sin));
     assert!(!PdfImporter.sniff(b"<svg xmlns="));
+    assert_eq!(PdfImporter.extensions(), ["pdf"]);
 }
 
 #[test]
-fn imported_figure_is_y_down_and_has_a_backdrop() {
+fn imported_figure_is_y_down_in_points() {
     let Some(sin) = fixture("sin_mathematica.pdf") else { return };
-    let figure = PdfImporter.import(sin.clone()).unwrap();
+    let figure = import(&PdfImporter, &sin).unwrap();
     assert_eq!((figure.width, figure.height), (260.0, 166.0));
+    assert_eq!(figure.unit, Unit::Point);
     assert_eq!(figure.primitives.len(), 19);
 
     for c in &figure.primitives {
@@ -53,31 +65,36 @@ fn imported_figure_is_y_down_and_has_a_backdrop() {
             c.name()
         );
     }
+}
 
-    let back = figure.backdrop.expect("the page is rendered");
-    assert_eq!(back.bitmap.rgba.len(), (back.bitmap.width * back.bitmap.height * 4) as usize);
-    assert_eq!(back.bitmap.width, (figure.width * back.scale).floor() as u32);
-    assert!(back.bitmap.rgba.chunks(4).all(|px| px[3] == 255), "opaque on white");
+#[test]
+fn the_page_picture_covers_the_page_on_white() {
+    let Some(sin) = fixture("sin_mathematica.pdf") else { return };
+    let figure = import(&PdfImporter, &sin).unwrap();
+    let back = whole_page(&sin, &figure);
+    assert_eq!(back.rgba.len(), (back.width * back.height * 4) as usize);
+    assert_eq!((back.width, back.height), ((figure.width * K).ceil() as u32, (figure.height * K).ceil() as u32));
+    assert!(back.rgba.chunks(4).all(|px| px[3] == 255), "opaque on white");
     // the page is not blank: the plot has dark strokes on white
-    assert!(back.bitmap.rgba.chunks(4).any(|px| px[0] < 128));
-    assert!(back.bitmap.rgba.chunks(4).any(|px| px[0] == 255));
+    assert!(back.rgba.chunks(4).any(|px| px[0] < 128));
+    assert!(back.rgba.chunks(4).any(|px| px[0] == 255));
 }
 
 #[test]
 fn imported_strokes_line_up_with_the_rendered_page() {
     let Some(sin) = fixture("sin_mathematica.pdf") else { return };
     // The first stroke is dark ink on the page, so the pixel under one of its vertices must not be white.
-    let figure = PdfImporter.import(sin.clone()).unwrap();
-    let back = figure.backdrop.as_ref().unwrap();
+    let figure = import(&PdfImporter, &sin).unwrap();
+    let back = whole_page(&sin, &figure);
     let dark_under = |p: &plotextract_core::Primitive| {
         p.points.iter().any(|v| {
-            let (x, y) = ((v.x * back.scale) as u32, (v.y * back.scale) as u32);
-            (x < back.bitmap.width && y < back.bitmap.height) && {
+            let (x, y) = ((v.x * K) as u32, (v.y * K) as u32);
+            (x < back.width && y < back.height) && {
                 // look in a 3-pixel neighbourhood: strokes are antialiased and a vertex sits on their centre line
-                (y.saturating_sub(2)..(y + 3).min(back.bitmap.height)).any(|yy| {
-                    (x.saturating_sub(2)..(x + 3).min(back.bitmap.width)).any(|xx| {
-                        let i = ((yy * back.bitmap.width + xx) * 4) as usize;
-                        back.bitmap.rgba[i] < 200
+                (y.saturating_sub(2)..(y + 3).min(back.height)).any(|yy| {
+                    (x.saturating_sub(2)..(x + 3).min(back.width)).any(|xx| {
+                        let i = ((yy * back.width + xx) * 4) as usize;
+                        back.rgba[i] < 200
                     })
                 })
             }
@@ -88,7 +105,7 @@ fn imported_strokes_line_up_with_the_rendered_page() {
     assert!(aligned * 4 >= strokes.count() * 3, "only {aligned} strokes sit on ink");
 }
 
-fn crop(bitmap: &plotextract_core::Bitmap, x: u32, y: u32, w: u32, h: u32) -> Vec<u8> {
+fn crop(bitmap: &Bitmap, x: u32, y: u32, w: u32, h: u32) -> Vec<u8> {
     let mut out = Vec::new();
     for row in y..y + h {
         let start = ((row * bitmap.width + x) * 4) as usize;
@@ -98,20 +115,15 @@ fn crop(bitmap: &plotextract_core::Bitmap, x: u32, y: u32, w: u32, h: u32) -> Ve
 }
 
 #[test]
-fn region_render_at_the_backdrop_scale_is_the_backdrop() {
+fn a_sub_region_renders_as_the_matching_part_of_the_page() {
     let Some(sin) = fixture("sin_mathematica.pdf") else { return };
-    let figure = PdfImporter.import(sin.clone()).unwrap();
-    let back = figure.backdrop.as_ref().unwrap();
-    let mut renderer = PdfImporter.region_renderer(&sin).expect("PDF can re-render regions");
-
-    let whole = renderer.render(kurbo::Rect::new(0.0, 0.0, figure.width, figure.height), back.scale).unwrap();
-    assert_eq!((whole.width, whole.height), (back.bitmap.width, back.bitmap.height));
-    assert!(whole.rgba == back.bitmap.rgba, "the whole page renders the same as the backdrop");
+    let figure = import(&PdfImporter, &sin).unwrap();
+    let back = whole_page(&sin, &figure);
+    let mut picture = picture(&PdfImporter, &sin).unwrap();
 
     // a region starting on a pixel boundary is exactly that crop of the page
-    let k = back.scale;
-    let sub = renderer.render(kurbo::Rect::new(100.0, 50.0, 160.0, 100.0), k).unwrap();
-    let want = crop(&back.bitmap, (100.0 * k) as u32, (50.0 * k) as u32, sub.width, sub.height);
+    let sub = picture.render(Rect::new(100.0, 50.0, 160.0, 100.0), K).unwrap();
+    let want = crop(&back, (100.0 * K) as u32, (50.0 * K) as u32, sub.width, sub.height);
     // The rasterizer may differ in the last bit of an antialiased edge; the picture must be the same.
     let differing = sub.rgba.iter().zip(&want).filter(|(a, b)| a.abs_diff(**b) > 8).count();
     eprintln!("sub-region: {differing} of {} bytes differ by more than 8", want.len());
@@ -121,18 +133,17 @@ fn region_render_at_the_backdrop_scale_is_the_backdrop() {
 #[test]
 fn zoomed_region_is_the_same_picture_in_more_pixels() {
     let Some(sin) = fixture("sin_mathematica.pdf") else { return };
-    let figure = PdfImporter.import(sin.clone()).unwrap();
-    let back = figure.backdrop.as_ref().unwrap();
-    let k = back.scale;
-    let mut renderer = PdfImporter.region_renderer(&sin).unwrap();
+    let figure = import(&PdfImporter, &sin).unwrap();
+    let back = whole_page(&sin, &figure);
+    let mut picture = picture(&PdfImporter, &sin).unwrap();
 
-    // 4x the backdrop's resolution on a 40 x 40 pt patch that holds part of the curve and an axis
-    let region = kurbo::Rect::new(30.0, 120.0, 70.0, 160.0);
-    let zoomed = renderer.render(region, 4.0 * k).unwrap();
+    // 4x the resolution on a 40 x 40 pt patch that holds part of the curve and an axis
+    let region = Rect::new(30.0, 120.0, 70.0, 160.0);
+    let zoomed = picture.render(region, 4.0 * K).unwrap();
     assert_eq!((zoomed.width, zoomed.height), (960, 960));
 
-    // box-filter it down 4x and compare with the backdrop's pixels for the same patch
-    let reference = crop(&back.bitmap, (region.x0 * k) as u32, (region.y0 * k) as u32, 240, 240);
+    // box-filter it down 4x and compare with the page picture's pixels for the same patch
+    let reference = crop(&back, (region.x0 * K) as u32, (region.y0 * K) as u32, 240, 240);
     let mut total = 0u64;
     for y in 0..240usize {
         for x in 0..240usize {

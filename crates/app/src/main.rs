@@ -5,7 +5,9 @@ mod about;
 mod app;
 mod canvas;
 mod detail;
+mod model;
 mod panel;
+mod text;
 mod theme;
 mod view;
 

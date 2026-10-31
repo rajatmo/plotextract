@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -16,6 +16,8 @@ strip = "symbols"
 [workspace.dependencies]
 # internal crates
 plotextract-core = { path = "crates/core" }
+plotextract-import = { path = "crates/import" }
+plotextract-workspace = { path = "crates/workspace" }
 plotextract-pdf = { path = "crates/pdf" }
 plotextract-ps = { path = "crates/ps" }
 plotextract-svg = { path = "crates/svg" }

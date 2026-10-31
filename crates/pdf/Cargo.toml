@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 plotextract-core.workspace = true
+plotextract-import.workspace = true
 hayro.workspace = true
 hayro-interpret.workspace = true
 hayro-syntax.workspace = true

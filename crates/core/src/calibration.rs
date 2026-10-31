@@ -36,15 +36,7 @@ impl Slot {
         matches!(self, Slot::XMax | Slot::YMax) as usize
     }
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Slot::XMin => "x min",
-            Slot::XMax => "x max",
-            Slot::YMin => "y min",
-            Slot::YMax => "y max",
-        }
-    }
-
+    /// The row the workflow moves to after this one: x min, x max, y min, y max, then stays on the last.
     pub fn next(self) -> Slot {
         match self {
             Slot::XMin => Slot::XMax,
@@ -119,15 +111,6 @@ impl AxisCal {
             return Err(CalError::SameValue);
         }
         Ok(AxisMap { p0, u0, slope: (u1 - u0) / (p1 - p0), log: self.log })
-    }
-
-    /// One-line state of the axis for display.
-    pub fn status(&self) -> String {
-        match self.map() {
-            Ok(_) if self.log => "calibrated (log)".into(),
-            Ok(_) => "calibrated".into(),
-            Err(e) => e.to_string(),
-        }
     }
 }
 

@@ -1,26 +1,35 @@
-//! The canvas: the page picture, the curves over it, pan and zoom, snapping, picking, and sharp detail rendering.
+//! The canvas: the page picture, the curves over it, pan and zoom, snapping and picking. It reads the session, keeps only
+//! its own state (view, pictures, hover) and reports what the user did as [`Intent`]s.
 
 use std::time::{Duration, Instant};
 
 use egui::{Color32, Context, CornerRadius, FontId, PointerButton, Pos2, Sense, Shape, Stroke, Ui, vec2};
 use kurbo::Point;
-use plotextract_core::{Axis, Command, Pick, PrimitiveKind, Slot};
+use plotextract_core::{Axis, Bitmap, Edit, Figure, Hit, Pick, PrimitiveKind, Session, Slot};
+use plotextract_workspace::Source;
 
-use crate::app::{App, curve_label};
-use crate::detail;
-use crate::theme::{FILL_COLOR, GUIDE_COLOR, MEMBER_COLOR, SELECT_COLOR, STROKE_COLOR};
+use crate::detail::{self, Kind, Worker};
+use crate::model::Intent;
+use crate::text::{curve_label, measure, slot_label};
+use crate::theme::{FILL_COLOR, GUIDE_COLOR, MEMBER_COLOR, SELECT_COLOR, STROKE_COLOR, TEXT_SIZE};
 use crate::view::{View, marker_pos};
 
 /// Hover snaps to the nearest vertex within this many screen pixels.
 const SNAP_PX: f32 = 12.0;
 /// A click on a line, away from any vertex, selects it within this many pixels.
 const PICK_PX: f32 = 6.0;
+/// Curves smaller than this on screen (their longer side, in pixels) are not outlined: the picture shows them.
+const MIN_OUTLINE_PX: f32 = 1.0;
+/// With more curves than this in view none is outlined: every one costs a frame its share, and the picture shows them.
+const MAX_OUTLINED: usize = 10_000;
+/// Points closer than this many pixels to the last one drawn are skipped.
+const MIN_STEP_PX: f32 = 1.0;
 /// The view must be still this long before sharp detail is rendered.
 const SETTLE: Duration = Duration::from_millis(250);
 
-/// A piece of the backdrop bitmap, as a texture no larger than the GPU allows.
+/// A piece of a bitmap, as a texture no larger than the GPU allows.
 struct Tile {
-    /// Pixel position and size within the backdrop bitmap.
+    /// Pixel position and size within the bitmap.
     x: u32,
     y: u32,
     w: u32,
@@ -29,14 +38,14 @@ struct Tile {
 }
 
 /// A bitmap laid on the figure: its top left corner in figure space and its pixels per figure unit.
-pub(crate) struct Picture {
+struct Picture {
     origin: Point,
     scale: f64,
     tiles: Vec<Tile>,
 }
 
 impl Picture {
-    pub(crate) fn new(ctx: &Context, bitmap: &plotextract_core::Bitmap, origin: Point, scale: f64) -> Self {
+    fn new(ctx: &Context, bitmap: &Bitmap, origin: Point, scale: f64) -> Self {
         Self { origin, scale, tiles: tiles_of(ctx, bitmap) }
     }
 
@@ -51,16 +60,24 @@ impl Picture {
     }
 }
 
-/// Sharp detail laid over the backdrop.
-pub(crate) struct Detail {
+/// Sharp detail laid over the base picture.
+struct Detail {
     /// The figure-space area the render covers.
     region: kurbo::Rect,
     scale: f64,
     picture: Picture,
 }
 
+/// The detail render asked for and not yet delivered.
+#[derive(Clone, Copy)]
+struct Pending {
+    id: u64,
+    region: kurbo::Rect,
+    scale: f64,
+}
+
 /// Cut a bitmap into textures that fit the GPU's size limit.
-fn tiles_of(ctx: &Context, bitmap: &plotextract_core::Bitmap) -> Vec<Tile> {
+fn tiles_of(ctx: &Context, bitmap: &Bitmap) -> Vec<Tile> {
     let side = ctx.input(|i| i.max_texture_side).clamp(512, 4096) as u32;
     let mut tiles = Vec::new();
     for y in (0..bitmap.height).step_by(side as usize) {
@@ -72,156 +89,205 @@ fn tiles_of(ctx: &Context, bitmap: &plotextract_core::Bitmap) -> Vec<Tile> {
                 rgba.extend_from_slice(&bitmap.rgba[start..start + (w * 4) as usize]);
             }
             let image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
-            let texture = ctx.load_texture(format!("backdrop {x},{y}"), image, egui::TextureOptions::LINEAR);
+            let texture = ctx.load_texture(format!("picture {x},{y}"), image, egui::TextureOptions::LINEAR);
             tiles.push(Tile { x, y, w, h, texture });
         }
     }
     tiles
 }
 
-impl App {
-    pub(crate) fn canvas(&mut self, ui: &mut Ui) {
-        let Some(session) = self.session.as_mut() else {
-            self.welcome(ui);
-            return;
-        };
-        let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
-        let rect = response.rect;
-        let origin = rect.min;
-        let figure_size = (session.figure.width, session.figure.height);
-        self.view.resized(rect.size(), figure_size);
-
-        let mods = ui.input(|i| i.modifiers);
-        let select_tool = mods.command;
-
-        // zoom about the cursor, pan with the hand tool
-        if let Some(cursor) = response.hover_pos() {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll != 0.0 {
-                self.view.zoom_about(origin, cursor, (scroll * 0.0015).exp(), figure_size);
+/// The screen points of one piece of a curve, keeping only what can show: the stretches outside `clip` are dropped and
+/// points within a pixel of the last one kept are skipped. A curve of millions of vertices becomes a few thousand
+/// points, whatever the zoom.
+fn screen_runs(piece: &[Point], view: &View, origin: Pos2, clip: egui::Rect) -> Vec<Vec<Pos2>> {
+    let mut runs = Vec::new();
+    let mut run: Vec<Pos2> = Vec::new();
+    let mut skipped: Option<Pos2> = None; // the latest point left out of the run, kept if the run ends there
+    let mut previous: Option<Pos2> = None;
+    for q in piece {
+        let p = view.to_screen(origin, *q);
+        if let Some(a) = previous {
+            if !clip.intersects(egui::Rect::from_two_pos(a, p)) {
+                // this segment is off screen: close the run
+                run.extend(skipped.take());
+                if run.len() >= 2 {
+                    runs.push(std::mem::take(&mut run));
+                }
+                run.clear();
+                previous = Some(p);
+                continue;
+            }
+            if run.is_empty() {
+                run.push(a);
             }
         }
-        let panning =
-            (response.dragged_by(PointerButton::Primary) && !select_tool) || response.dragged_by(PointerButton::Middle);
-        if panning {
-            self.view.pan(response.drag_delta());
-        }
-        // Other widgets set their own cursor (text boxes, resize edges), and the canvas is drawn last: it may only
-        // claim the cursor while the pointer is really over it, or a pan that began there is still under way.
-        if panning {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-        } else if response.hovered() {
-            ui.ctx().set_cursor_icon(if select_tool { egui::CursorIcon::Crosshair } else { egui::CursorIcon::Grab });
-        }
-
-        self.refine_detail(ui.ctx(), rect);
-        let session = self.session.as_mut().expect("checked above");
-
-        // snapping and picking use screen-pixel radii
-        let pixel = 1.0 / f64::from(self.view.zoom);
-        let pointer = response.hover_pos().map(|p| self.view.to_figure(origin, p));
-        self.hover =
-            if select_tool { pointer.and_then(|p| session.snap_vertex(p, f64::from(SNAP_PX) * pixel)) } else { None };
-
-        let mut command = None;
-        if let (true, Some(p)) = (response.clicked_by(PointerButton::Primary) && select_tool, pointer) {
-            let pick = session.pick_at(p, f64::from(SNAP_PX) * pixel, f64::from(PICK_PX) * pixel);
-            command = Some(match (mods.shift, pick) {
-                (true, Some(pick)) => Command::ToggleMember(pick.primitive),
-                _ => Command::Select(pick),
-            });
-        }
-        if response.secondary_clicked() {
-            // a right click selects the point under the mouse, as the hand tool does not snap
-            if let Some(hit) = pointer.and_then(|p| session.snap_vertex(p, f64::from(SNAP_PX) * pixel)) {
-                command = Some(Command::Select(Some(Pick { primitive: hit.primitive, vertex: Some(hit.vertex) })));
+        match run.last() {
+            Some(&last) if (p - last).length_sq() < MIN_STEP_PX * MIN_STEP_PX => skipped = Some(p),
+            _ => {
+                run.push(p);
+                skipped = None;
             }
         }
-        let mut error = None;
-        if let Some(Err(e)) = command.map(|c| session.apply(c)) {
-            error = Some(e.to_string());
+        previous = Some(p);
+    }
+    run.extend(skipped);
+    if run.len() >= 2 {
+        runs.push(run);
+    }
+    runs
+}
+
+/// Everything the canvas remembers between frames.
+pub struct CanvasState {
+    pub view: View,
+    hover: Option<Hit>,
+    base: Option<Picture>,
+    detail: Option<Detail>,
+    pending: Option<Pending>,
+    worker: Option<Worker>,
+    base_scale: f64,
+    /// View state seen last frame, and when it last differed.
+    last_view: (f32, egui::Vec2, egui::Vec2),
+    changed_at: Instant,
+}
+
+impl Default for CanvasState {
+    fn default() -> Self {
+        Self {
+            view: View::default(),
+            hover: None,
+            base: None,
+            detail: None,
+            pending: None,
+            worker: None,
+            base_scale: 1.0,
+            last_view: (0.0, egui::Vec2::ZERO, egui::Vec2::ZERO),
+            changed_at: Instant::now(),
         }
+    }
+}
 
-        self.paint(&painter, rect, select_tool);
+impl CanvasState {
+    /// A figure was opened: forget the old one's pictures and ask for the new one's.
+    pub fn open(&mut self, ctx: &Context, figure: &Figure, source: Option<Source>) {
+        *self = Self::default();
+        self.base_scale = detail::base_scale(figure.width, figure.height);
+        self.worker = source.map(|s| Worker::spawn(ctx.clone(), s));
+        if let Some(worker) = &mut self.worker {
+            let page = kurbo::Rect::new(0.0, 0.0, figure.width, figure.height);
+            worker.request(Kind::Base, page, self.base_scale);
+        }
+    }
 
-        // the right-click menu records the selected point as a calibration tick
-        let mut chosen = None;
-        let session = self.session.as_ref().expect("checked above");
-        response.context_menu(|ui| match (session.selection(), session.selected_point()) {
-            (Some(pick), Some(point)) => {
-                let prim = &session.figure.primitives[pick.primitive];
-                let title = format!(
-                    "Record point {} of {}",
-                    pick.vertex.unwrap_or(0) + 1,
-                    curve_label(pick.primitive, prim.kind)
-                );
-                ui.label(egui::RichText::new(title).strong());
-                ui.separator();
-                for slot in Slot::ALL {
-                    let value = if slot.axis() == Axis::X { point.x } else { point.y };
-                    let mut text = format!("{} = {value:.4} pt", slot.label());
-                    if let Some(old) = session.calibration().position(slot) {
-                        text.push_str(&format!("   (replaces {old:.4})"));
-                    }
-                    if ui.button(text).clicked() {
-                        chosen = Some(slot);
-                        ui.close();
-                    }
+    /// The vertex under the pointer, while the select tool is held.
+    pub fn hover(&self) -> Option<Hit> {
+        self.hover
+    }
+}
+
+/// Draw the canvas for a session and return what the user did on it.
+pub fn show(ui: &mut Ui, session: &Session, state: &mut CanvasState) -> Vec<Intent> {
+    let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+    let rect = response.rect;
+    let origin = rect.min;
+    let figure_size = (session.figure.width, session.figure.height);
+    state.view.resized(rect.size(), figure_size);
+
+    let mods = ui.input(|i| i.modifiers);
+    let select_tool = mods.command;
+
+    // zoom about the cursor, pan with the hand tool
+    if let Some(cursor) = response.hover_pos() {
+        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+        if scroll != 0.0 {
+            state.view.zoom_about(origin, cursor, (scroll * 0.0015).exp(), figure_size);
+        }
+    }
+    let panning =
+        (response.dragged_by(PointerButton::Primary) && !select_tool) || response.dragged_by(PointerButton::Middle);
+    if panning {
+        state.view.pan(response.drag_delta());
+    }
+    // Other widgets set their own cursor (text boxes, resize edges), and the canvas is drawn last: it may only
+    // claim the cursor while the pointer is really over it, or a pan that began there is still under way.
+    if panning {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    } else if response.hovered() {
+        ui.ctx().set_cursor_icon(if select_tool { egui::CursorIcon::Crosshair } else { egui::CursorIcon::Grab });
+    }
+
+    state.refine_detail(ui.ctx(), rect, session);
+
+    // snapping and picking use screen-pixel radii
+    let pixel = 1.0 / f64::from(state.view.zoom);
+    let pointer = response.hover_pos().map(|p| state.view.to_figure(origin, p));
+    state.hover =
+        if select_tool { pointer.and_then(|p| session.snap_vertex(p, f64::from(SNAP_PX) * pixel)) } else { None };
+
+    let mut intents = Vec::new();
+    if let (true, Some(p)) = (response.clicked_by(PointerButton::Primary) && select_tool, pointer) {
+        let pick = session.pick_at(p, f64::from(SNAP_PX) * pixel, f64::from(PICK_PX) * pixel);
+        intents.push(match (mods.shift, pick) {
+            (true, Some(pick)) => Intent::Edit(Edit::ToggleMember(pick.primitive)),
+            _ => Intent::Select(pick),
+        });
+    }
+    if response.secondary_clicked() {
+        // a right click selects the point under the mouse, as the hand tool does not snap
+        if let Some(hit) = pointer.and_then(|p| session.snap_vertex(p, f64::from(SNAP_PX) * pixel)) {
+            intents.push(Intent::Select(Some(Pick { primitive: hit.primitive, vertex: Some(hit.vertex) })));
+        }
+    }
+
+    state.paint(&painter, rect, select_tool, session);
+
+    // the right-click menu records the selected point as a calibration tick
+    response.context_menu(|ui| match (session.selection(), session.selected_point()) {
+        (Some(pick), Some(point)) => {
+            let prim = &session.figure.primitives[pick.primitive];
+            let title =
+                format!("Record point {} of {}", pick.vertex.unwrap_or(0) + 1, curve_label(pick.primitive, prim.kind));
+            ui.label(egui::RichText::new(title).strong());
+            ui.separator();
+            for slot in Slot::ALL {
+                let value = if slot.axis() == Axis::X { point.x } else { point.y };
+                let mut label = format!("{} = {}", slot_label(slot), measure(value, session.figure.unit, 4));
+                if let Some(old) = session.calibration().position(slot) {
+                    label.push_str(&format!("   (replaces {old:.4})"));
+                }
+                if ui.button(label).clicked() {
+                    intents.push(Intent::RecordAt(slot));
+                    ui.close();
                 }
             }
-            _ => {
-                ui.add_enabled(false, egui::Label::new("Select a point first (Ctrl+click on a curve)"));
-            }
-        });
-        if let Some(slot) = chosen {
-            self.slot = slot;
-            if self.apply(Command::RecordSelected(slot)) {
-                self.info(format!("{} recorded. Type its plot value in the table.", slot.label()));
-            }
         }
-        if let Some(e) = error {
-            self.error(e);
+        _ => {
+            ui.add_enabled(false, egui::Label::new("Select a point first (Ctrl+click on a curve)"));
         }
-    }
+    });
+    intents
+}
 
-    /// The screen shown before a file is open.
-    fn welcome(&mut self, ui: &mut Ui) {
-        let mut open = false;
-        ui.vertical_centered(|ui| {
-            ui.add_space((ui.available_height() * 0.28).max(20.0));
-            ui.image((self.icon.id(), vec2(104.0, 104.0)));
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new("plotextract").heading().strong().size(28.0));
-            ui.label(egui::RichText::new("Get the numbers out of a plot").weak());
-            ui.add_space(14.0);
-            if ui.add_sized([180.0, 34.0], crate::theme::primary("Open a plot\u{2026}")).clicked() {
-                open = true;
+impl CanvasState {
+    /// Receive finished renders, and once the view has been still for a moment ask for sharp detail of what is visible
+    /// (or drop it when the base picture is sharp enough).
+    fn refine_detail(&mut self, ctx: &Context, canvas: egui::Rect, session: &Session) {
+        if let Some(worker) = &self.worker {
+            for done in worker.poll_all() {
+                let origin = Point::new(done.region.x0, done.region.y0);
+                let picture = Picture::new(ctx, &done.bitmap, origin, done.scale);
+                match done.kind {
+                    Kind::Base => self.base = Some(picture),
+                    Kind::Detail if self.pending.is_some_and(|p| p.id == done.id) => {
+                        let (w, h) =
+                            (f64::from(done.bitmap.width) / done.scale, f64::from(done.bitmap.height) / done.scale);
+                        let covered = kurbo::Rect::new(origin.x, origin.y, origin.x + w, origin.y + h);
+                        self.detail = Some(Detail { region: covered, scale: done.scale, picture });
+                        self.pending = None;
+                    }
+                    Kind::Detail => {}
+                }
             }
-            ui.add_space(8.0);
-            crate::theme::hint(ui, "or drop a PDF, SVG, EPS or PostScript file on the window");
-        });
-        if open {
-            self.pending_actions.push(crate::app::Action::OpenDialog);
-            ui.ctx().request_repaint();
-        }
-    }
-
-    /// Receive finished detail renders, and once the view has been still for a moment ask for sharp detail of what is
-    /// visible (or drop it when the backdrop is sharp enough).
-    fn refine_detail(&mut self, ctx: &Context, canvas: egui::Rect) {
-        if let (Some(worker), Some((id, _, _))) = (&self.worker, self.pending)
-            && let Some(done) = worker.poll()
-            && done.id == id
-        {
-            let origin = Point::new(done.region.x0, done.region.y0);
-            let (w, h) = (f64::from(done.bitmap.width) / done.scale, f64::from(done.bitmap.height) / done.scale);
-            let covered = kurbo::Rect::new(origin.x, origin.y, origin.x + w, origin.y + h);
-            self.detail = Some(Detail {
-                region: covered,
-                scale: done.scale,
-                picture: Picture::new(ctx, &done.bitmap, origin, done.scale),
-            });
-            self.pending = None;
         }
 
         let state = (self.view.zoom, self.view.offset, canvas.size());
@@ -234,7 +300,9 @@ impl App {
             ctx.request_repaint_after(SETTLE - waited);
             return;
         }
-        let (Some(session), Some(backdrop)) = (self.session.as_ref(), self.backdrop.as_ref()) else { return };
+        if self.worker.is_none() {
+            return;
+        }
         let (a, b) = (self.view.to_figure(canvas.min, canvas.min), self.view.to_figure(canvas.min, canvas.max));
         let visible = kurbo::Rect::new(a.x, a.y, b.x, b.y);
         let page = kurbo::Rect::new(0.0, 0.0, session.figure.width, session.figure.height);
@@ -242,7 +310,7 @@ impl App {
         let wanted = if std::env::var_os("PLOTEXTRACT_NO_DETAIL").is_some() {
             None
         } else {
-            detail::plan(visible, page, screen_scale, backdrop.scale)
+            detail::plan(visible, page, screen_scale, self.base_scale)
         };
         match wanted {
             None => {
@@ -252,17 +320,16 @@ impl App {
             Some((region, scale)) => {
                 let need = visible.intersect(page);
                 let served = self.detail.as_ref().is_some_and(|d| detail::covers(d.region, d.scale, need, scale));
-                let asked = self.pending.is_some_and(|(_, r, s)| detail::covers(r, s, need, scale));
+                let asked = self.pending.is_some_and(|p| detail::covers(p.region, p.scale, need, scale));
                 if let (false, false, Some(worker)) = (served, asked, self.worker.as_mut()) {
-                    let id = worker.request(region, scale);
-                    self.pending = Some((id, region, scale));
+                    let id = worker.request(Kind::Detail, region, scale);
+                    self.pending = Some(Pending { id, region, scale });
                 }
             }
         }
     }
 
-    fn paint(&self, painter: &egui::Painter, rect: egui::Rect, select_tool: bool) {
-        let session = self.session.as_ref().expect("a figure is open");
+    fn paint(&self, painter: &egui::Painter, rect: egui::Rect, select_tool: bool, session: &Session) {
         let painter = painter.with_clip_rect(rect);
         let view = &self.view;
         let origin = rect.min;
@@ -281,57 +348,55 @@ impl App {
         }
         painter.rect_filled(page, 0.0, Color32::WHITE);
         if session.layers().page {
-            if let Some(backdrop) = &self.backdrop {
-                backdrop.draw(&painter, view, origin);
+            if let Some(base) = &self.base {
+                base.draw(&painter, view, origin);
             }
             if let Some(detail) = &self.detail {
                 detail.picture.draw(&painter, view, origin);
             }
         }
 
-        let in_series: Vec<bool> = {
-            let mut v = vec![false; session.figure.primitives.len()];
-            if let Some(a) = session.active_series() {
-                for &m in &session.series()[a].members {
-                    v[m] = true;
-                }
-            }
-            v
-        };
+        let members: &[usize] = session.active_series().map_or(&[], |a| &session.series()[a].members);
         let selected = session.selection().map(|p| p.primitive);
         let hovered = self.hover.map(|h| h.primitive);
 
+        let clip = rect.expand(3.0);
         let draw = |i: usize, stroke_width: f32, color: Option<Color32>| {
+            if !clip.intersects(view.screen_rect(origin, session.bounds(i))) {
+                return;
+            }
             let prim = &session.figure.primitives[i];
             let color = color.unwrap_or(if prim.kind == PrimitiveKind::Stroke { STROKE_COLOR } else { FILL_COLOR });
             let stroke = Stroke::new(stroke_width, color);
             let mut shapes = Vec::new();
             for piece in prim.pieces() {
-                if piece.len() < 2 {
-                    continue;
-                }
-                let pts: Vec<Pos2> = piece.iter().map(|q| view.to_screen(origin, *q)).collect();
-                if prim.kind == PrimitiveKind::Fill && color == FILL_COLOR {
-                    shapes.extend(Shape::dashed_line(&pts, stroke, 6.0, 4.0));
-                } else {
-                    shapes.push(Shape::line(pts, stroke));
+                for run in screen_runs(piece, view, origin, clip) {
+                    if prim.kind == PrimitiveKind::Fill && color == FILL_COLOR {
+                        shapes.extend(Shape::dashed_line(&run, stroke, 6.0, 4.0));
+                    } else {
+                        shapes.push(Shape::line(run, stroke));
+                    }
                 }
             }
             painter.extend(shapes);
         };
 
-        for (i, prim) in session.figure.primitives.iter().enumerate() {
-            if !session.is_visible(i) {
-                continue;
+        // the curves worth outlining: in view and big enough to see
+        let outlined: Vec<usize> = (0..session.figure.primitives.len())
+            .filter(|&i| {
+                let on_screen = view.screen_rect(origin, session.bounds(i));
+                session.is_visible(i) && clip.intersects(on_screen) && on_screen.size().max_elem() >= MIN_OUTLINE_PX
+            })
+            .take(MAX_OUTLINED + 1)
+            .collect();
+        let too_many = outlined.len() > MAX_OUTLINED;
+        if !too_many {
+            for i in outlined {
+                draw(i, 1.5, None);
             }
-            let Some(extent) = prim.extent() else { continue };
-            if !rect.intersects(view.screen_rect(origin, extent).expand(3.0)) {
-                continue;
-            }
-            draw(i, 1.5, None);
         }
-        for (i, member) in in_series.iter().enumerate() {
-            if *member && session.is_visible(i) {
+        for &i in members {
+            if session.is_visible(i) {
                 draw(i, 3.0, Some(MEMBER_COLOR));
             }
         }
@@ -373,15 +438,158 @@ impl App {
         }
 
         // which tool is active, as a small pill in the corner
-        let text = if select_tool {
-            "Select tool \u{b7} click a curve, Shift+click adds it to the series"
+        let mut text = if select_tool {
+            "Select tool \u{b7} click a curve, Shift+click adds it to the series".to_owned()
         } else {
-            "Hand tool \u{b7} drag to pan, wheel to zoom \u{b7} hold Ctrl to select"
+            "Hand tool \u{b7} drag to pan, wheel to zoom \u{b7} hold Ctrl to select".to_owned()
         };
+        if too_many {
+            text.push_str(" \u{b7} too many curves in view to outline: zoom in");
+        }
         let galley =
-            painter.layout_no_wrap(text.to_owned(), FontId::proportional(crate::theme::TEXT_SIZE), Color32::WHITE);
+            painter.layout(text, FontId::proportional(TEXT_SIZE), Color32::WHITE, (rect.width() - 44.0).max(100.0));
         let pill = egui::Rect::from_min_size(rect.min + vec2(12.0, 12.0), galley.size() + vec2(20.0, 10.0));
         painter.rect_filled(pill, CornerRadius::same(12), Color32::from_black_alpha(150));
         painter.galley(pill.min + vec2(10.0, 5.0), galley, Color32::WHITE);
+    }
+}
+
+#[cfg(test)]
+mod frame_cost {
+    //! How long one frame of the canvas takes to record and tessellate for figures far larger than a plot usually is.
+    //! Slow, so only run on request: `cargo test --release -p plotextract frame_cost -- --ignored --nocapture`.
+
+    use std::time::Instant;
+
+    use egui::pos2;
+    use plotextract_core::{Primitive, PrimitiveKind, Unit};
+
+    use super::*;
+
+    fn figure(primitives: Vec<Primitive>) -> Figure {
+        Figure { width: 576.0, height: 432.0, unit: Unit::Point, primitives, page: 0, page_count: 1, truncated: false }
+    }
+
+    fn prim(kind: PrimitiveKind, index: usize, points: Vec<Point>) -> Primitive {
+        Primitive::new(kind, index, points, vec![])
+    }
+
+    /// One curve of two million vertices.
+    fn long_curve() -> Figure {
+        let n = 2_000_000;
+        let points = (0..n)
+            .map(|i| Point::new(40.0 + 500.0 * i as f64 / n as f64, 216.0 + 150.0 * (i as f64 * 0.001).sin()))
+            .collect();
+        figure(vec![prim(PrimitiveKind::Stroke, 0, points)])
+    }
+
+    /// A hundred thousand little circles.
+    fn markers() -> Figure {
+        let primitives = (0..100_000)
+            .map(|i| {
+                let (cx, cy) = (
+                    40.0 + 500.0 * ((i * 7919) % 1000) as f64 / 1000.0,
+                    40.0 + 350.0 * ((i * 104729) % 997) as f64 / 997.0,
+                );
+                let points = (0..24).map(|k| {
+                    let a = k as f64 * std::f64::consts::TAU / 23.0;
+                    Point::new(cx + 1.5 * a.cos(), cy + 1.5 * a.sin())
+                });
+                prim(PrimitiveKind::Stroke, i, points.collect())
+            })
+            .collect();
+        figure(primitives)
+    }
+
+    /// Five thousand polylines of twenty vertices.
+    fn many_curves() -> Figure {
+        let primitives = (0..5000)
+            .map(|i| {
+                let points = (0..20)
+                    .map(|k| {
+                        Point::new(
+                            40.0 + 500.0 * ((i * 31 + k * 17) % 100) as f64 / 100.0,
+                            40.0 + 350.0 * ((i * 53 + k * 29) % 100) as f64 / 100.0,
+                        )
+                    })
+                    .collect();
+                prim(PrimitiveKind::Stroke, i, points)
+            })
+            .collect();
+        figure(primitives)
+    }
+
+    fn frame(ctx: &Context, session: &Session, state: &mut CanvasState) -> f64 {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0))),
+            ..Default::default()
+        };
+        let t = Instant::now();
+        let output = ctx.run_ui(input, |ui| {
+            show(ui, session, state);
+        });
+        let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
+        t.elapsed().as_secs_f64() * 1e3
+    }
+
+    #[test]
+    #[ignore = "a measurement, not a check"]
+    fn how_long_a_frame_takes() {
+        for (name, figure) in
+            [("one curve of 2M points", long_curve()), ("100k markers", markers()), ("5000 curves", many_curves())]
+        {
+            let session = Session::new(figure, None);
+            let ctx = Context::default();
+            let mut state = CanvasState::default();
+            frame(&ctx, &session, &mut state); // fits the page
+            let fitted = frame(&ctx, &session, &mut state);
+            state.view.zoom_about(Pos2::ZERO, pos2(600.0, 400.0), 30.0, (576.0, 432.0));
+            let zoomed = frame(&ctx, &session, &mut state);
+            println!("{name:24} fitted {fitted:8.1} ms   zoomed in {zoomed:8.1} ms");
+        }
+    }
+}
+
+#[cfg(test)]
+mod screen_run_tests {
+    use egui::{Rect, pos2};
+
+    use super::*;
+
+    fn runs(points: &[(f64, f64)], clip: Rect) -> Vec<Vec<Pos2>> {
+        let piece: Vec<Point> = points.iter().map(|&(x, y)| Point::new(x, y)).collect();
+        let view = View::default(); // one pixel per unit, no offset
+        screen_runs(&piece, &view, Pos2::ZERO, clip)
+    }
+
+    const SCREEN: Rect = Rect { min: pos2(0.0, 0.0), max: pos2(100.0, 100.0) };
+
+    #[test]
+    fn a_dense_curve_keeps_a_point_per_pixel_and_both_ends() {
+        let points: Vec<(f64, f64)> = (0..=1000).map(|i| (f64::from(i) * 0.05, 10.0)).collect(); // 20 points per pixel
+        let r = runs(&points, SCREEN);
+        assert_eq!(r.len(), 1);
+        let run = &r[0];
+        assert!(run.len() < 70, "{} points kept of 1001", run.len());
+        assert_eq!(run[0], pos2(0.0, 10.0));
+        assert_eq!(*run.last().unwrap(), pos2(50.0, 10.0), "the end of the curve is never dropped");
+    }
+
+    #[test]
+    fn the_stretch_off_screen_is_cut_and_the_curve_resumes_where_it_comes_back() {
+        let r = runs(&[(10.0, 10.0), (50.0, 10.0), (500.0, 10.0), (900.0, 500.0), (60.0, 90.0), (30.0, 90.0)], SCREEN);
+        // the segment 50 -> 500 still crosses the screen, so it is kept; 500 -> 900 is entirely outside; the way back
+        // in starts with the point it comes from
+        assert_eq!(r.len(), 2, "{r:?}");
+        assert_eq!(r[0], [pos2(10.0, 10.0), pos2(50.0, 10.0), pos2(500.0, 10.0)]);
+        assert_eq!(r[1].first(), Some(&pos2(900.0, 500.0)));
+        assert_eq!(r[1].last(), Some(&pos2(30.0, 90.0)));
+    }
+
+    #[test]
+    fn a_curve_wholly_outside_or_a_lone_point_draws_nothing() {
+        assert!(runs(&[(500.0, 500.0), (600.0, 600.0)], SCREEN).is_empty());
+        assert!(runs(&[(10.0, 10.0)], SCREEN).is_empty());
+        assert!(runs(&[], SCREEN).is_empty());
     }
 }

@@ -1,97 +1,34 @@
-//! The egui shell: application state, menus, file handling, and the frame loop that turns input into `Session` commands.
+//! The egui shell: it owns the model and the widgets' state, gathers what the user did into intents each frame, hands
+//! them to the model and performs the effects that need a dialog, the clipboard, the window or a thread.
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Instant;
+use std::collections::VecDeque;
+use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender, channel};
 
-use egui::{Align, Color32, Context, Key, Layout, Modifiers, RichText, Ui};
-use kurbo::Point;
-use plotextract_core::{Command, Figure, Hit, Importer, PrimitiveKind, Session, Slot, format_g};
-use plotextract_pdf::PdfImporter;
-use plotextract_ps::PsImporter;
-use plotextract_svg::SvgImporter;
+use egui::{Align, Color32, Context, Key, Layout, Modifiers, RichText, Ui, vec2};
+use plotextract_core::format_g;
 
-use crate::canvas::{Detail, Picture};
-use crate::detail::Worker;
-use crate::theme;
-use crate::view::View;
+use crate::canvas::{self, CanvasState};
+use crate::model::{Effect, Intent, Level, Loaded, Model};
+use crate::panel::{self, PanelState};
+use crate::text::{curve_label, measure};
+use crate::{about, theme};
 
 /// The side panel's width, in points. It does not resize: the cards inside are laid out for it.
 const SIDE_PANEL_WIDTH: f32 = 340.0;
 
-/// Things the UI asks for that need a dialog, the clipboard or the whole app.
-pub(crate) enum Action {
-    OpenDialog,
-    Open(PathBuf),
-    SaveProject,
-    LoadProject,
-    ExportCsv,
-    CopyNumbers,
-    Undo,
-    Redo,
-    Fit,
-    Record,
-    About,
-    Quit,
-}
-
 pub struct App {
-    pub(crate) session: Option<Session>,
-    pub(crate) backdrop: Option<Picture>,
-    pub(crate) detail: Option<Detail>,
-    /// The detail render asked for and not yet delivered: its id, region and scale.
-    pub(crate) pending: Option<(u64, kurbo::Rect, f64)>,
-    pub(crate) worker: Option<Worker>,
-    /// View state seen last frame, and when it last differed.
-    pub(crate) last_view: (f32, egui::Vec2, egui::Vec2),
-    pub(crate) changed_at: Instant,
-    pub(crate) view: View,
-    pub(crate) hover: Option<Hit>,
-    /// The calibration row the Record button fills next.
-    pub(crate) slot: Slot,
-    /// Text of the plot value cells, so half-typed numbers survive.
-    pub(crate) values: [String; 4],
-    pub(crate) message: Option<(String, bool)>,
-    pub(crate) icon: egui::TextureHandle,
-    pub(crate) show_about: bool,
-    /// Actions requested by widgets drawn outside the panels (the welcome screen), run next frame.
-    pub(crate) pending_actions: Vec<Action>,
-    /// The curve table scrolls to this row (a curve selected on the canvas).
-    pub(crate) table_scroll_to: Option<usize>,
-    last_selection: Option<usize>,
-    /// The curve selected by clicking its table row: no need to scroll to it.
-    pub(crate) clicked_in_table: Option<usize>,
-}
-
-/// "Stroke" or "Fill".
-pub(crate) fn kind_name(kind: PrimitiveKind) -> &'static str {
-    match kind {
-        PrimitiveKind::Stroke => "Stroke",
-        PrimitiveKind::Fill => "Fill",
-    }
-}
-
-/// How a curve is named in messages: its type and its 1-based ID, as the curve table shows them.
-pub(crate) fn curve_label(index: usize, kind: PrimitiveKind) -> String {
-    format!("{} #{}", kind_name(kind), index + 1)
-}
-
-fn importers() -> Vec<Arc<dyn Importer>> {
-    vec![Arc::new(PdfImporter), Arc::new(SvgImporter), Arc::new(PsImporter)]
-}
-
-/// A loaded figure with what is needed to re-render parts of it later: the importer and the file's bytes.
-type Loaded = (Figure, Arc<dyn Importer>, Arc<Vec<u8>>);
-
-fn load_figure(path: &Path) -> Result<Loaded, String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    let head = &bytes[..bytes.len().min(1024)];
-    let importer = importers()
-        .into_iter()
-        .find(|i| i.sniff(head))
-        .ok_or_else(|| "this file format is not supported yet".to_string())?;
-    let figure = importer.import(bytes.clone()).map_err(|e| e.to_string())?;
-    Ok((figure, importer, Arc::new(bytes)))
+    model: Model,
+    canvas: CanvasState,
+    panel: PanelState,
+    icon: egui::TextureHandle,
+    show_about: bool,
+    /// Intents raised by widgets drawn after the frame's intents were run (the welcome screen), run next frame.
+    deferred: Vec<Intent>,
+    /// Files being opened on background threads send their answers here.
+    loads: (Sender<Loaded>, Receiver<Loaded>),
+    /// What is typed in the password prompt.
+    password: String,
 }
 
 impl App {
@@ -103,345 +40,305 @@ impl App {
         let icon = cc.egui_ctx.load_texture("app icon", image, egui::TextureOptions::LINEAR);
 
         let mut app = Self {
-            session: None,
-            backdrop: None,
-            detail: None,
-            pending: None,
-            worker: None,
-            last_view: (0.0, egui::Vec2::ZERO, egui::Vec2::ZERO),
-            changed_at: Instant::now(),
-            view: View::default(),
-            hover: None,
-            slot: Slot::XMin,
-            values: Default::default(),
-            message: None,
+            model: Model::default(),
+            canvas: CanvasState::default(),
+            panel: PanelState::default(),
             icon,
             show_about: false,
-            pending_actions: Vec::new(),
-            table_scroll_to: None,
-            last_selection: None,
-            clicked_in_table: None,
+            deferred: Vec::new(),
+            loads: channel(),
+            password: String::new(),
         };
         if let Some(path) = path {
-            app.open(&cc.egui_ctx, &path);
+            app.run(&cc.egui_ctx, vec![Intent::Open(path)]);
         }
         app
     }
 
-    pub(crate) fn error(&mut self, text: impl Into<String>) {
-        self.message = Some((text.into(), true));
-    }
-
-    pub(crate) fn info(&mut self, text: impl Into<String>) {
-        self.message = Some((text.into(), false));
-    }
-
-    fn open(&mut self, ctx: &Context, path: &Path) {
-        match load_figure(path) {
-            Ok((figure, importer, bytes)) => {
-                self.backdrop = figure.backdrop.as_ref().map(|b| Picture::new(ctx, &b.bitmap, Point::ZERO, b.scale));
-                self.detail = None;
-                self.pending = None;
-                self.worker = Some(Worker::spawn(ctx.clone(), importer, bytes));
-                let n = figure.primitives.len();
-                self.view = View::default();
-                self.hover = None;
-                self.slot = Slot::XMin;
-                self.table_scroll_to = None;
-                self.last_selection = None;
-                self.clicked_in_table = None;
-                self.session = Some(Session::new(figure, Some(path.display().to_string())));
-                self.sync_values();
-                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} \u{2013} plotextract")));
-                self.info(format!("Opened {name}: {n} curves. Hold Ctrl and click a curve to select it."));
-            }
-            Err(e) => self.error(format!("Cannot open {}: {e}", path.display())),
-        }
-    }
-
-    /// Fill the value cells from the session's calibration (after an undo, a project load, a new document).
-    pub(crate) fn sync_values(&mut self) {
-        if let Some(s) = &self.session {
-            for (i, slot) in Slot::ALL.into_iter().enumerate() {
-                self.values[i] = s.calibration().value(slot).map(|v| format_g(v, 10)).unwrap_or_default();
+    /// Hand intents to the model and perform what it asks of the shell. Dialogs answer with further intents.
+    fn run(&mut self, ctx: &Context, intents: Vec<Intent>) {
+        let mut queue = VecDeque::from(intents);
+        while let Some(intent) = queue.pop_front() {
+            for effect in self.model.dispatch(intent) {
+                self.perform(ctx, effect, &mut queue);
             }
         }
     }
 
-    pub(crate) fn apply(&mut self, command: Command) -> bool {
-        let Some(s) = &mut self.session else { return false };
-        match s.apply(command) {
-            Ok(()) => true,
-            Err(e) => {
-                self.error(e.to_string());
-                false
+    /// Give the model the files that finished opening.
+    fn receive_loads(&mut self, ctx: &Context) {
+        while let Ok(loaded) = self.loads.1.try_recv() {
+            let mut queue = VecDeque::new();
+            for effect in self.model.finish_load(loaded) {
+                self.perform(ctx, effect, &mut queue);
+            }
+            while let Some(intent) = queue.pop_front() {
+                self.run(ctx, vec![intent]);
             }
         }
     }
 
-    // --- actions that need dialogs or the clipboard ------------------------------------------------
-
-    fn run(&mut self, ctx: &Context, action: Action) {
-        match action {
-            Action::OpenDialog => {
-                if let Some(path) = rfd::FileDialog::new().add_filter("Plots", &["pdf", "svg", "eps", "ps"]).pick_file()
-                {
-                    self.open(ctx, &path);
+    fn perform(&mut self, ctx: &Context, effect: Effect, then: &mut VecDeque<Intent>) {
+        match effect {
+            Effect::AskOpenPath => {
+                let dialog = rfd::FileDialog::new().add_filter("Plots", &self.model.extensions());
+                then.extend(dialog.pick_file().map(Intent::Open));
+            }
+            Effect::AskProjectToLoad => {
+                let dialog = rfd::FileDialog::new().add_filter("plotextract project", &["json"]);
+                then.extend(dialog.pick_file().map(Intent::LoadProject));
+            }
+            Effect::AskProjectSavePath { suggested } => {
+                let dialog =
+                    rfd::FileDialog::new().set_file_name(suggested).add_filter("plotextract project", &["json"]);
+                then.extend(dialog.save_file().map(Intent::SaveProject));
+            }
+            Effect::AskCsvPath { suggested } => {
+                let dialog = rfd::FileDialog::new().set_file_name(suggested).add_filter("CSV", &["csv"]);
+                then.extend(dialog.save_file().map(Intent::WriteCsv));
+            }
+            Effect::CopyText(text) => ctx.copy_text(text),
+            Effect::Load(job) => {
+                let (done, ctx) = (self.loads.0.clone(), ctx.clone());
+                std::thread::spawn(move || {
+                    let _ = done.send(job.run());
+                    ctx.request_repaint();
+                });
+            }
+            Effect::Opened { title, source } => {
+                if let Some(session) = self.model.session() {
+                    self.canvas.open(ctx, &session.figure, source);
+                }
+                self.panel = PanelState::default();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+            }
+            Effect::ValuesChanged => {
+                if let Some(session) = self.model.session() {
+                    self.panel.sync_values(session);
                 }
             }
-            Action::Open(path) => self.open(ctx, &path),
-            Action::SaveProject => self.save_project(),
-            Action::LoadProject => self.load_project(ctx),
-            Action::ExportCsv => {
-                if let Some(text) = self.csv_or_warn() {
-                    let name = self.active_name();
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_file_name(format!("{name}.csv"))
-                        .add_filter("CSV", &["csv"])
-                        .save_file()
-                    {
-                        match std::fs::write(&path, text) {
-                            Ok(()) => self.info(format!("Wrote {}", path.display())),
-                            Err(e) => self.error(format!("Cannot write {}: {e}", path.display())),
-                        }
-                    }
-                }
-            }
-            Action::CopyNumbers => {
-                if let Some(text) = self.csv_or_warn() {
-                    ctx.copy_text(text);
-                    self.info("Copied the series as x,y text.");
-                }
-            }
-            Action::Undo => {
-                if self.session.as_mut().is_some_and(|s| s.undo()) {
-                    self.sync_values();
-                }
-            }
-            Action::Redo => {
-                if self.session.as_mut().is_some_and(|s| s.redo()) {
-                    self.sync_values();
-                }
-            }
-            Action::Fit => self.view.request_fit(),
-            Action::Record => {
-                if self.apply(Command::RecordSelected(self.slot)) {
-                    let slot = self.slot;
-                    self.slot = slot.next();
-                    self.info(format!("{} recorded. Type its plot value in the table.", slot.label()));
-                }
-            }
-            Action::About => self.show_about = !self.show_about,
-            Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Effect::FitView => self.canvas.view.request_fit(),
+            Effect::ToggleAbout => self.show_about = !self.show_about,
+            Effect::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
     }
 
-    fn active_name(&self) -> String {
-        self.session
-            .as_ref()
-            .and_then(|s| s.active_series().map(|a| s.series()[a].name.clone()))
-            .unwrap_or_else(|| "series".into())
-    }
-
-    fn csv_or_warn(&mut self) -> Option<String> {
-        let s = self.session.as_ref()?;
-        let Some(active) = s.active_series() else {
-            self.error("Make a series first: select a curve, then Add curve.");
-            return None;
-        };
-        match s.csv(active) {
-            Ok(text) => Some(text),
-            Err(e) => {
-                self.error(e.to_string());
-                None
-            }
-        }
-    }
-
-    fn save_project(&mut self) {
-        let Some(s) = &self.session else { return };
-        let suggested = s
-            .source
-            .as_deref()
-            .and_then(|p| Path::new(p).file_stem())
-            .map(|n| format!("{}.plotextract.json", n.to_string_lossy()));
-        let Some(path) = rfd::FileDialog::new()
-            .set_file_name(suggested.unwrap_or_else(|| "project.plotextract.json".into()))
-            .add_filter("plotextract project", &["json"])
-            .save_file()
-        else {
-            return;
-        };
-        let result = serde_json::to_string_pretty(&s.project())
-            .map_err(|e| e.to_string())
-            .and_then(|t| std::fs::write(&path, t).map_err(|e| e.to_string()));
-        match result {
-            Ok(()) => self.info(format!("Saved {}", path.display())),
-            Err(e) => self.error(format!("Cannot save {}: {e}", path.display())),
-        }
-    }
-
-    fn load_project(&mut self, ctx: &Context) {
-        let Some(path) = rfd::FileDialog::new().add_filter("plotextract project", &["json"]).pick_file() else {
-            return;
-        };
-        let project: Result<plotextract_core::Project, String> = std::fs::read_to_string(&path)
-            .map_err(|e| e.to_string())
-            .and_then(|t| serde_json::from_str(&t).map_err(|e| e.to_string()));
-        let project = match project {
-            Ok(p) => p,
-            Err(e) => return self.error(format!("Cannot read {}: {e}", path.display())),
-        };
-        if let Some(source) = project.source.clone() {
-            let source = PathBuf::from(source);
-            // Reopen the figure unless it is the one already shown.
-            if self.session.as_ref().and_then(|s| s.source.as_deref()) != source.to_str() {
-                self.open(ctx, &source);
-            }
-        }
-        match &mut self.session {
-            Some(s) => {
-                s.load_project(project);
-                self.sync_values();
-                self.info(format!("Loaded {}", path.display()));
-            }
-            None => self.error("The project's figure could not be opened."),
-        }
-    }
-
-    // --- frame ---------------------------------------------------------------------------------------
-
-    fn shortcuts(&self, ctx: &Context, actions: &mut Vec<Action>) {
+    fn shortcuts(&self, ctx: &Context, intents: &mut Vec<Intent>) {
         let take = |mods: Modifiers, key: Key| ctx.input_mut(|i| i.consume_key(mods, key));
         if take(Modifiers::COMMAND, Key::O) {
-            actions.push(Action::OpenDialog);
+            intents.push(Intent::RequestOpen);
         }
         if take(Modifiers::COMMAND, Key::S) {
-            actions.push(Action::SaveProject);
+            intents.push(Intent::RequestSaveProject);
         }
         if take(Modifiers::COMMAND, Key::R) {
-            actions.push(Action::Record);
+            intents.push(Intent::Record);
         }
         if take(Modifiers::COMMAND, Key::Num0) {
-            actions.push(Action::Fit);
+            intents.push(Intent::FitView);
         }
         if take(Modifiers::NONE, Key::F1) {
-            actions.push(Action::About);
+            intents.push(Intent::ToggleAbout);
         }
         if take(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || take(Modifiers::COMMAND, Key::Y) {
-            actions.push(Action::Redo);
+            intents.push(Intent::Redo);
         } else if take(Modifiers::COMMAND, Key::Z) {
-            actions.push(Action::Undo);
+            intents.push(Intent::Undo);
+        }
+        if let Some(f) = self.model.session().map(|s| &s.figure) {
+            if take(Modifiers::NONE, Key::PageDown) && f.page + 1 < f.page_count {
+                intents.push(Intent::GoToPage(f.page + 1));
+            }
+            if take(Modifiers::NONE, Key::PageUp) && f.page > 0 {
+                intents.push(Intent::GoToPage(f.page - 1));
+            }
         }
     }
 
-    fn menu(&self, ui: &mut Ui, actions: &mut Vec<Action>) {
-        let has_figure = self.session.is_some();
-        let mut item = |ui: &mut Ui, enabled: bool, text: &str, shortcut: &str, action: Action| {
+    fn menu(&self, ui: &mut Ui, intents: &mut Vec<Intent>) {
+        let session = self.model.session();
+        let has_figure = session.is_some();
+        let (page, pages) = session.map_or((0, 1), |s| (s.figure.page, s.figure.page_count));
+        let mut item = |ui: &mut Ui, enabled: bool, text: &str, shortcut: &str, intent: Intent| {
             let button = egui::Button::new(text).shortcut_text(shortcut);
             if ui.add_enabled(enabled, button).clicked() {
-                actions.push(action);
+                intents.push(intent);
                 ui.close();
             }
         };
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                item(ui, true, "Open\u{2026}", "Ctrl+O", Action::OpenDialog);
+                item(ui, true, "Open\u{2026}", "Ctrl+O", Intent::RequestOpen);
                 ui.separator();
-                item(ui, true, "Open project\u{2026}", "", Action::LoadProject);
-                item(ui, has_figure, "Save project\u{2026}", "Ctrl+S", Action::SaveProject);
+                item(ui, true, "Open project\u{2026}", "", Intent::RequestLoadProject);
+                item(ui, has_figure, "Save project\u{2026}", "Ctrl+S", Intent::RequestSaveProject);
                 ui.separator();
-                item(ui, true, "Quit", "", Action::Quit);
+                item(ui, true, "Quit", "", Intent::Quit);
             });
             ui.menu_button("Edit", |ui| {
-                let (undo, redo) = self.session.as_ref().map_or((false, false), |s| (s.can_undo(), s.can_redo()));
-                item(ui, undo, "Undo", "Ctrl+Z", Action::Undo);
-                item(ui, redo, "Redo", "Ctrl+Shift+Z", Action::Redo);
+                let (undo, redo) = session.map_or((false, false), |s| (s.can_undo(), s.can_redo()));
+                item(ui, undo, "Undo", "Ctrl+Z", Intent::Undo);
+                item(ui, redo, "Redo", "Ctrl+Shift+Z", Intent::Redo);
             });
             ui.menu_button("View", |ui| {
-                item(ui, has_figure, "Fit page", "Ctrl+0", Action::Fit);
+                item(ui, has_figure, "Fit page", "Ctrl+0", Intent::FitView);
+                ui.separator();
+                item(ui, page > 0, "Previous page", "Page Up", Intent::GoToPage(page.saturating_sub(1)));
+                item(ui, page + 1 < pages, "Next page", "Page Down", Intent::GoToPage(page + 1));
             });
             ui.menu_button("Help", |ui| {
-                item(ui, true, "About plotextract", "F1", Action::About);
+                item(ui, true, "About plotextract", "F1", Intent::ToggleAbout);
             });
         });
     }
 
     fn status_bar(&self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            if let (Some(hit), Some(s)) = (&self.hover, &self.session) {
-                let p = &s.figure.primitives[hit.primitive];
-                let at = format!("{}, point {}", curve_label(hit.primitive, p.kind), hit.vertex + 1);
-                let readout = match s.plot_coords(hit.pos) {
-                    Some((x, y)) => format!("x = {}    y = {}", format_g(x, 6), format_g(y, 6)),
-                    None => format!("x = {:.3} pt    y = {:.3} pt    (not calibrated)", hit.pos.x, hit.pos.y),
-                };
-                ui.label(RichText::new(at).strong());
-                ui.label(RichText::new(readout).monospace());
-            } else if let Some((text, is_error)) = &self.message {
-                let color = if *is_error { Color32::from_rgb(214, 70, 70) } else { ui.visuals().text_color() };
-                ui.label(RichText::new(text).color(color));
-            } else {
-                ui.label(RichText::new("Open a plot to begin").weak());
+        let session = self.model.session();
+        // the size and zoom sit at the right and keep their room; the message gets the rest and is cut to fit
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if let Some(s) = session {
+                let zoom = f64::from(self.canvas.view.zoom) * 100.0;
+                let figure = &s.figure;
+                ui.label(
+                    RichText::new(format!(
+                        "{:.0} \u{d7} {:.0} {}    {zoom:.0}%",
+                        figure.width,
+                        figure.height,
+                        figure.unit.symbol()
+                    ))
+                    .weak(),
+                );
             }
-            if let Some(s) = &self.session {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let zoom = f64::from(self.view.zoom) * 100.0;
-                    ui.label(
-                        RichText::new(format!("{:.0} \u{d7} {:.0} pt    {zoom:.0}%", s.figure.width, s.figure.height))
-                            .weak(),
-                    );
-                });
-            }
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                if let Some(name) = self.model.loading() {
+                    ui.spinner();
+                    ui.label(format!("Opening {name}\u{2026}"));
+                } else if let (Some(hit), Some(s)) = (self.canvas.hover(), session) {
+                    let p = &s.figure.primitives[hit.primitive];
+                    let at = format!("{}, point {}", curve_label(hit.primitive, p.kind), hit.vertex + 1);
+                    let readout = match s.plot_coords(hit.pos) {
+                        Some((x, y)) => format!("x = {}    y = {}", format_g(x, 6), format_g(y, 6)),
+                        None => {
+                            let unit = s.figure.unit;
+                            format!(
+                                "x = {}    y = {}    (not calibrated)",
+                                measure(hit.pos.x, unit, 3),
+                                measure(hit.pos.y, unit, 3)
+                            )
+                        }
+                    };
+                    ui.label(RichText::new(at).strong());
+                    ui.label(RichText::new(readout).monospace());
+                } else if let Some(message) = self.model.message() {
+                    let color = match message.level {
+                        Level::Error => Color32::from_rgb(214, 70, 70),
+                        Level::Warning => Color32::from_rgb(214, 140, 20),
+                        Level::Info => ui.visuals().text_color(),
+                    };
+                    ui.add(egui::Label::new(RichText::new(&message.text).color(color)).truncate())
+                        .on_hover_text(&message.text);
+                } else {
+                    ui.label(RichText::new("Open a plot to begin").weak());
+                }
+            });
         });
+    }
+
+    /// The screen shown before a file is open.
+    fn welcome(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space((ui.available_height() * 0.28).max(20.0));
+            ui.image((self.icon.id(), vec2(104.0, 104.0)));
+            ui.add_space(6.0);
+            ui.label(RichText::new("plotextract").heading().strong().size(28.0));
+            ui.label(RichText::new("Get the numbers out of a plot").weak());
+            ui.add_space(14.0);
+            if ui.add_sized([180.0, 34.0], theme::primary("Open a plot\u{2026}")).clicked() {
+                self.deferred.push(Intent::RequestOpen);
+                ui.ctx().request_repaint();
+            }
+            ui.add_space(8.0);
+            theme::hint(ui, "or drop a PDF, SVG, EPS or PostScript file on the window");
+        });
+    }
+
+    /// Ask for the password of a protected file. Returns what the user decided.
+    fn password_prompt(&mut self, ctx: &Context, intents: &mut Vec<Intent>) {
+        let Some(prompt) = self.model.password_prompt() else {
+            self.password.clear();
+            return;
+        };
+        let (file, wrong) = (prompt.file.clone(), prompt.wrong);
+        let mut submit = false;
+        let mut cancel = ctx.input(|i| i.key_pressed(Key::Escape));
+        egui::Window::new("Password required")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.set_width(320.0);
+                ui.label(format!("{file} is protected. Type its password to open it."));
+                ui.add_space(6.0);
+                let field = egui::TextEdit::singleline(&mut self.password).password(true).desired_width(f32::INFINITY);
+                let response = ui.add(field);
+                response.request_focus();
+                // the field keeps the focus, so Enter is read directly rather than as the field giving it up
+                if response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                    submit = true;
+                }
+                if wrong {
+                    ui.add_space(2.0);
+                    ui.label(RichText::new("That password is wrong.").color(Color32::from_rgb(214, 70, 70)));
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(!self.password.is_empty(), theme::primary("Open")).clicked() {
+                        submit = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if submit && !self.password.is_empty() {
+            intents.push(Intent::SubmitPassword(std::mem::take(&mut self.password)));
+        } else if cancel {
+            self.password.clear();
+            intents.push(Intent::CancelPassword);
+        }
     }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        let mut actions = std::mem::take(&mut self.pending_actions);
+        self.receive_loads(&ctx);
+        let mut intents = std::mem::take(&mut self.deferred);
 
         if let Some(path) = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf())) {
-            actions.push(Action::Open(path));
+            intents.push(Intent::Open(path));
         }
-        self.shortcuts(&ctx, &mut actions);
+        self.shortcuts(&ctx, &mut intents);
+        self.panel.track_selection(self.model.session().and_then(|s| s.selection()).map(|p| p.primitive));
 
-        // a curve selected on the canvas scrolls into view in the table; one clicked in the table does not move it
-        let selection = self.session.as_ref().and_then(|s| s.selection()).map(|p| p.primitive);
-        if selection != self.last_selection {
-            if selection.is_some() && selection != self.clicked_in_table {
-                self.table_scroll_to = selection;
-            }
-            self.last_selection = selection;
-            self.clicked_in_table = None;
-        }
-
-        egui::Panel::top("menu").show(ui, |ui| self.menu(ui, &mut actions));
+        egui::Panel::top("menu").show(ui, |ui| self.menu(ui, &mut intents));
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         let panel_frame = egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(12));
         egui::Panel::right("side")
             .resizable(false)
             .exact_size(SIDE_PANEL_WIDTH)
             .frame(panel_frame)
-            .show(ui, |ui| self.side_panel(ui, &mut actions));
-        egui::CentralPanel::default().show(ui, |ui| self.canvas(ui));
-        self.about_window(&ctx);
+            .show(ui, |ui| intents.extend(panel::show(ui, &self.model, &mut self.panel)));
+        egui::CentralPanel::default().show(ui, |ui| match self.model.session() {
+            Some(session) => intents.extend(canvas::show(ui, session, &mut self.canvas)),
+            None => self.welcome(ui),
+        });
+        about::window(&ctx, &mut self.show_about, self.icon.id());
+        self.password_prompt(&ctx, &mut intents);
 
-        for action in actions {
-            self.run(&ctx, action);
+        if !intents.is_empty() {
+            self.run(&ctx, intents);
+            ctx.request_repaint();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn curves_are_labelled_by_type_and_one_based_id() {
-        assert_eq!(curve_label(0, PrimitiveKind::Stroke), "Stroke #1");
-        assert_eq!(curve_label(11, PrimitiveKind::Fill), "Fill #12");
     }
 }
