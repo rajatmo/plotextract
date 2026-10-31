@@ -1,0 +1,14 @@
+[package]
+name = "plotextract-core"
+description = "Format-independent core: figures, primitives, calibration, series, snapping, session and export"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+kurbo.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

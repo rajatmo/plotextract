@@ -1,0 +1,17 @@
+[package]
+name = "plotextract-pdf"
+description = "PDF importer: vector paths via hayro-interpret, page bitmaps via hayro"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+plotextract-core.workspace = true
+hayro.workspace = true
+hayro-interpret.workspace = true
+hayro-syntax.workspace = true
+kurbo.workspace = true
+thiserror.workspace = true
+

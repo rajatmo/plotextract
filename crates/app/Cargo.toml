@@ -1,0 +1,26 @@
+[package]
+name = "plotextract"
+description = "Pick curves from plots in PDF, PostScript, SVG and raster images and export them in plot units"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+plotextract-core.workspace = true
+plotextract-pdf.workspace = true
+plotextract-ps.workspace = true
+plotextract-svg.workspace = true
+eframe.workspace = true
+egui.workspace = true
+egui_extras.workspace = true
+rfd.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+kurbo.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true

@@ -1,0 +1,49 @@
+name: release
+
+# Builds the app on every platform and keeps the packages as workflow artifacts. Pushing a tag like v0.1.0 also attaches
+# them to a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # the oldest supported glibc: the Linux binary runs on anything newer
+          - { os: ubuntu-22.04, script: "bash scripts/dist.sh dist" }
+          - { os: macos-latest, script: "bash scripts/dist.sh dist" } # Apple silicon
+          - { os: macos-13, script: "bash scripts/dist.sh dist" } # Intel
+          - { os: windows-latest, script: "pwsh scripts/dist.ps1 -Out dist" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+      - run: ${{ matrix.script }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plotextract-${{ matrix.os }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: packages/*

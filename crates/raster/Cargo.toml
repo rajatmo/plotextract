@@ -1,0 +1,17 @@
+[package]
+name = "plotextract-raster"
+description = "Raster image decoding and shape detection (filters, morphology, contours) with tunable overlays"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+plotextract-core.workspace = true
+image.workspace = true
+tiff.workspace = true
+imageproc.workspace = true
+ndarray.workspace = true
+rayon.workspace = true
+thiserror.workspace = true

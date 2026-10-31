@@ -1,0 +1,20 @@
+[package]
+name = "plotextract-corpus"
+description = "Accuracy tests: real plots from matplotlib and Mathematica in every supported format"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+plotextract-core.workspace = true
+plotextract-pdf.workspace = true
+plotextract-ps.workspace = true
+plotextract-svg.workspace = true
+kurbo.workspace = true
+serde.workspace = true
+serde_json.workspace = true
