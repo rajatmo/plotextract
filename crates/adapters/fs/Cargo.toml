@@ -1,0 +1,11 @@
+[package]
+name = "plotextract-fs"
+description = "The local file system behind the Files port"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+plotextract-ports.workspace = true

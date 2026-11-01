@@ -1,10 +1,11 @@
 //! The sin plot made by Mathematica, checked against what the Python prototype extracted from it.
 
 use kurbo::Rect;
-use plotextract_core::{Bitmap, Figure, Importer, PrimitiveKind, Unit};
 use plotextract_corpus::{fixture, import, picture};
+use plotextract_domain::{Bitmap, Figure, PrimitiveKind, Unit};
 use plotextract_import::BEZIER_STEPS;
 use plotextract_pdf::{PdfImporter, extract};
+use plotextract_ports::Importer;
 
 /// Pixels per point of the reference picture.
 const K: f64 = 6.0;
@@ -86,7 +87,7 @@ fn imported_strokes_line_up_with_the_rendered_page() {
     // The first stroke is dark ink on the page, so the pixel under one of its vertices must not be white.
     let figure = import(&PdfImporter, &sin).unwrap();
     let back = whole_page(&sin, &figure);
-    let dark_under = |p: &plotextract_core::Primitive| {
+    let dark_under = |p: &plotextract_domain::Primitive| {
         p.points.iter().any(|v| {
             let (x, y) = ((v.x * K) as u32, (v.y * K) as u32);
             (x < back.width && y < back.height) && {

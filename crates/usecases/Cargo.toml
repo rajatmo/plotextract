@@ -1,0 +1,30 @@
+[package]
+name = "plotextract-usecases"
+description = "The use cases: the session on a vector figure, the library of files, and the wizard that traces an image"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+plotextract-domain.workspace = true
+plotextract-algo.workspace = true
+plotextract-ports.workspace = true
+kurbo.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+image = { workspace = true, optional = true }
+
+[dev-dependencies]
+plotextract-pdf.workspace = true
+plotextract-svg.workspace = true
+plotextract-ps.workspace = true
+plotextract-image.workspace = true
+plotextract-fs.workspace = true
+image.workspace = true
+
+[features]
+# the wizards on generated plots that tests set up
+fixtures = ["dep:image"]

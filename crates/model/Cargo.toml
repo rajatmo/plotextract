@@ -1,0 +1,27 @@
+[package]
+name = "plotextract-model"
+description = "The application model: intents in, effects out, jobs handed to the shell; no window"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+plotextract-domain.workspace = true
+plotextract-algo.workspace = true
+plotextract-ports.workspace = true
+plotextract-usecases.workspace = true
+kurbo.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+plotextract-pdf.workspace = true
+plotextract-svg.workspace = true
+plotextract-ps.workspace = true
+plotextract-image.workspace = true
+plotextract-fs.workspace = true
+plotextract-arxiv.workspace = true
+image.workspace = true
+flate2.workspace = true
+tar.workspace = true

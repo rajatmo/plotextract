@@ -2458,6 +2458,7 @@ dependencies = [
  "arrayvec",
  "euclid",
  "polycool",
+ "serde",
  "smallvec",
 ]
 
@@ -3514,21 +3515,31 @@ name = "plotextract"
 version = "1.0.0"
 dependencies = [
  "clap",
- "eframe",
- "egui",
- "egui_extras",
- "flate2",
- "image",
- "kurbo",
  "plotextract-arxiv",
- "plotextract-core",
- "plotextract-raster",
- "plotextract-workspace",
- "rfd",
- "tar",
- "tracing",
+ "plotextract-fs",
+ "plotextract-image",
+ "plotextract-model",
+ "plotextract-pdf",
+ "plotextract-ps",
+ "plotextract-svg",
+ "plotextract-ui",
+ "plotextract-usecases",
  "tracing-subscriber",
  "winresource",
+]
+
+[[package]]
+name = "plotextract-algo"
+version = "1.0.0"
+dependencies = [
+ "image",
+ "imageproc",
+ "kurbo",
+ "lsdetect",
+ "plotextract-domain",
+ "rayon",
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3536,19 +3547,11 @@ name = "plotextract-arxiv"
 version = "1.0.0"
 dependencies = [
  "flate2",
+ "plotextract-domain",
+ "plotextract-ports",
  "tar",
  "thiserror 2.0.21",
  "ureq",
-]
-
-[[package]]
-name = "plotextract-core"
-version = "1.0.0"
-dependencies = [
- "kurbo",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3557,15 +3560,48 @@ version = "1.0.0"
 dependencies = [
  "image",
  "kurbo",
- "plotextract-core",
+ "plotextract-algo",
+ "plotextract-domain",
+ "plotextract-fs",
+ "plotextract-image",
  "plotextract-import",
  "plotextract-pdf",
+ "plotextract-ports",
  "plotextract-ps",
- "plotextract-raster",
  "plotextract-svg",
- "plotextract-workspace",
+ "plotextract-usecases",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "plotextract-domain"
+version = "1.0.0"
+dependencies = [
+ "kurbo",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "plotextract-fs"
+version = "1.0.0"
+dependencies = [
+ "plotextract-ports",
+]
+
+[[package]]
+name = "plotextract-image"
+version = "1.0.0"
+dependencies = [
+ "image",
+ "kurbo",
+ "plotextract-algo",
+ "plotextract-domain",
+ "plotextract-import",
+ "plotextract-ports",
+ "rayon",
 ]
 
 [[package]]
@@ -3573,7 +3609,28 @@ name = "plotextract-import"
 version = "1.0.0"
 dependencies = [
  "kurbo",
- "plotextract-core",
+ "plotextract-domain",
+]
+
+[[package]]
+name = "plotextract-model"
+version = "1.0.0"
+dependencies = [
+ "flate2",
+ "image",
+ "kurbo",
+ "plotextract-algo",
+ "plotextract-arxiv",
+ "plotextract-domain",
+ "plotextract-fs",
+ "plotextract-image",
+ "plotextract-pdf",
+ "plotextract-ports",
+ "plotextract-ps",
+ "plotextract-svg",
+ "plotextract-usecases",
+ "serde_json",
+ "tar",
 ]
 
 [[package]]
@@ -3584,8 +3641,18 @@ dependencies = [
  "hayro-interpret",
  "hayro-syntax",
  "kurbo",
- "plotextract-core",
+ "plotextract-domain",
  "plotextract-import",
+ "plotextract-ports",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "plotextract-ports"
+version = "1.0.0"
+dependencies = [
+ "kurbo",
+ "plotextract-domain",
  "thiserror 2.0.21",
 ]
 
@@ -3594,24 +3661,11 @@ name = "plotextract-ps"
 version = "1.0.0"
 dependencies = [
  "kurbo",
- "plotextract-core",
+ "plotextract-domain",
  "plotextract-import",
+ "plotextract-ports",
  "stet",
  "stet-fonts",
-]
-
-[[package]]
-name = "plotextract-raster"
-version = "1.0.0"
-dependencies = [
- "image",
- "imageproc",
- "kurbo",
- "lsdetect",
- "plotextract-core",
- "plotextract-import",
- "rayon",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3619,22 +3673,52 @@ name = "plotextract-svg"
 version = "1.0.0"
 dependencies = [
  "kurbo",
- "plotextract-core",
+ "plotextract-domain",
  "plotextract-import",
+ "plotextract-ports",
  "resvg",
  "usvg",
 ]
 
 [[package]]
-name = "plotextract-workspace"
+name = "plotextract-ui"
 version = "1.0.0"
 dependencies = [
+ "eframe",
+ "egui",
+ "egui_extras",
+ "image",
  "kurbo",
- "plotextract-core",
+ "plotextract-algo",
+ "plotextract-domain",
+ "plotextract-fs",
+ "plotextract-image",
+ "plotextract-model",
  "plotextract-pdf",
+ "plotextract-ports",
  "plotextract-ps",
- "plotextract-raster",
  "plotextract-svg",
+ "plotextract-usecases",
+ "rayon",
+ "rfd",
+ "tracing",
+]
+
+[[package]]
+name = "plotextract-usecases"
+version = "1.0.0"
+dependencies = [
+ "image",
+ "kurbo",
+ "plotextract-algo",
+ "plotextract-domain",
+ "plotextract-fs",
+ "plotextract-image",
+ "plotextract-pdf",
+ "plotextract-ports",
+ "plotextract-ps",
+ "plotextract-svg",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
 ]
@@ -4249,7 +4333,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4564,6 +4648,9 @@ name = "smallvec"
 version = "1.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "smithay-client-toolkit"
@@ -5234,9 +5321,9 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 
 [[package]]
 name = "unicode-properties"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7df058c713841ad818f1dc5d3fd88063241cc61f49f5fbea4b951e8cf5a8d71d"
+checksum = "993ad287eb20e8ba755312801cfe1413e0f25d604075863acaddca10b04c1833"
 
 [[package]]
 name = "unicode-script"
@@ -6029,15 +6116,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets",
 ]

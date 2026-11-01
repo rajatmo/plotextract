@@ -1,8 +1,9 @@
 //! The &svg importer on a matplotlib figure (4 x 3 inches: 288 x 216 pt, which &svg counts in CSS pixels: 384 x 288).
 
 use kurbo::Rect;
-use plotextract_core::{Importer, PrimitiveKind, Unit};
 use plotextract_corpus::{fixture, import, picture};
+use plotextract_domain::{PrimitiveKind, Unit};
+use plotextract_ports::Importer;
 use plotextract_svg::SvgImporter;
 
 /// Pixels per figure unit of the reference picture.

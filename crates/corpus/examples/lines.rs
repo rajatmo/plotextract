@@ -6,8 +6,9 @@
 use std::time::Instant;
 
 use image::Rgba;
-use plotextract_raster::lines::{self, Algorithm, Orientation};
-use plotextract_raster::{ColourParams, Mask, Prepare, analyse_colours, decode};
+use plotextract_algo::lines::{self, Algorithm, Orientation};
+use plotextract_algo::{ColourParams, analyse_colours, decode};
+use plotextract_domain::{Mask, Prepare};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

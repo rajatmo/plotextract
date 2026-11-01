@@ -7,9 +7,9 @@
 //! figures state the tick values; their positions are found from the tick marks and the frame lines in the file.
 
 use kurbo::Point;
-use plotextract_core::{Axis, Edit, Figure, Pick, PrimitiveKind, Session, Slot};
 use plotextract_corpus::fixture;
-use plotextract_workspace::Registry;
+use plotextract_domain::{Axis, Edit, Figure, Pick, PrimitiveKind, Slot};
+use plotextract_usecases::Session;
 use serde::Deserialize;
 
 // --- ground truth files --------------------------------------------------------------------------
@@ -92,8 +92,9 @@ struct AxisSetup {
 fn open(rel: &str) -> Option<Figure> {
     let bytes = fixture(rel)?;
     let extension = rel.rsplit('.').next();
-    let importer =
-        Registry::standard().detect(&bytes, extension).unwrap_or_else(|| panic!("{rel}: no importer recognizes it"));
+    let importer = plotextract_corpus::registry()
+        .detect(&bytes, extension)
+        .unwrap_or_else(|| panic!("{rel}: no importer recognizes it"));
     Some(plotextract_corpus::import(&*importer, &bytes).unwrap_or_else(|e| panic!("{rel}: {e}")))
 }
 

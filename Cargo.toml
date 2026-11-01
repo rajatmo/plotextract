@@ -1,6 +1,22 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = [
+    "crates/domain",
+    "crates/algo",
+    "crates/ports",
+    "crates/usecases",
+    "crates/model",
+    "crates/ui",
+    "crates/app",
+    "crates/corpus",
+    "crates/adapters/import",
+    "crates/adapters/pdf",
+    "crates/adapters/ps",
+    "crates/adapters/svg",
+    "crates/adapters/image",
+    "crates/adapters/arxiv",
+    "crates/adapters/fs",
+]
 
 [workspace.package]
 version = "1.0.0"
@@ -14,15 +30,21 @@ lto = "thin"
 strip = "symbols"
 
 [workspace.dependencies]
-# internal crates
-plotextract-core = { path = "crates/core" }
-plotextract-import = { path = "crates/import" }
-plotextract-workspace = { path = "crates/workspace" }
-plotextract-pdf = { path = "crates/pdf" }
-plotextract-ps = { path = "crates/ps" }
-plotextract-svg = { path = "crates/svg" }
-plotextract-raster = { path = "crates/raster" }
-plotextract-arxiv = { path = "crates/arxiv" }
+# internal crates, from the inside out
+plotextract-domain = { path = "crates/domain" }
+plotextract-algo = { path = "crates/algo" }
+plotextract-ports = { path = "crates/ports" }
+plotextract-usecases = { path = "crates/usecases" }
+plotextract-model = { path = "crates/model" }
+plotextract-ui = { path = "crates/ui" }
+# adapters
+plotextract-import = { path = "crates/adapters/import" }
+plotextract-pdf = { path = "crates/adapters/pdf" }
+plotextract-ps = { path = "crates/adapters/ps" }
+plotextract-svg = { path = "crates/adapters/svg" }
+plotextract-image = { path = "crates/adapters/image" }
+plotextract-arxiv = { path = "crates/adapters/arxiv" }
+plotextract-fs = { path = "crates/adapters/fs" }
 
 # PDF
 hayro = "0.8"
@@ -38,7 +60,7 @@ usvg = "0.49"
 resvg = "0.49"
 
 # geometry
-kurbo = "0.13"
+kurbo = { version = "0.13", features = ["serde"] }
 
 # raster
 image = "0.25"

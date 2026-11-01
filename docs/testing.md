@@ -78,16 +78,16 @@ and prints one line per file (outcome, time, peak memory), so a hang, a crash or
 Opening and drawing both run on other threads, so none of these waits freezes the window; the pictures arrive when they
 are done.
 
-### Colours of an image (`crates/raster`, `crates/corpus/examples/colours.rs`)
+### Colours of an image (`crates/algo`, `crates/corpus/examples/colours.rs`)
 
 `cargo run --release -p plotextract-corpus --example colours -- image.png` prints the colours the wizard finds and the time
-it took (a few milliseconds for a 1050 x 525 image). The unit tests in `plotextract-raster` draw plots with antialiased
+it took (a few milliseconds for a 1050 x 525 image). The unit tests in `plotextract-algo` draw plots with antialiased
 lines, noise, dark backgrounds, masks and crops and check which inks are found and what each pixel is; the app's tests
 drive the step through intents (the analysis runs as a job, like opening a file). `testdata/make_raster.py` makes sample
 images: a clean plot, one with a legend, inset and colourbar, a JPEG of it, a dark one resized by 125%, and a screenshot with
 window chrome.
 
-### Straight lines of an image (`crates/raster`, `crates/corpus/examples/lines.rs`)
+### Straight lines of an image (`crates/algo`, `crates/corpus/examples/lines.rs`)
 
 `cargo run --release -p plotextract-corpus --example lines -- image.png [outdir] [--list]` finds the colours, takes the dark
 greys as the axes, and runs each algorithm on that mask: it prints how many lines were found and how long it took (about
@@ -97,38 +97,61 @@ pixel, that the Hough transform finds 6 pixel ticks and the line segment detecto
 and an empty mask give no lines. The app's tests drive the step with intents: choosing and clearing ticks, the algorithm,
 and coming back to the colours.
 
-### Curves of an image (`crates/raster/src/curves.rs`)
+### Pieces of an image (`crates/algo/src/curves.rs`)
 
 The unit tests draw strokes, dashes, specks and markers on generated masks and check the pieces found (with the axes cut
-out), the centre of a stroke to a fraction of a pixel (the faint edge pixels count), and markers traced to their centres.
+out), and a piece's centre to a fraction of a pixel (a pixel counts as much as it is covered), with the inks kept.
 The app's tests draw a framed plot with a blue line, a black curve that starts on the frame (black being the axes too) and
 a legend dash outside the frame, and check through intents that each curve colour gets a series without the frame or the
 legend, that the series is written in plot values, that pieces are moved between series by hand and kept when the pieces
 are found again, and that the search runs as a job after the line search.
 
-### Shapes of an image (`crates/raster/src/shapes.rs`, `crates/corpus/examples/shapes.rs`)
+### Shapes of an image (`crates/algo/src/shapes.rs`, `crates/corpus/examples/shapes.rs`)
 
-The unit tests draw the things a curve mask holds and check what each piece is found to be: the dots of a dotted line
-turned with it chain in order whatever their turn, rings far apart are markers with one hole, a lone square is a stray;
-a dot just off the line (the dot of an *i*) stays out of it; dashes and dots alternating are one path, traced to a point
-every stroke along each dash and one per dot; markers glued onto their line are taken off it; and a word of different
-shapes close together is text. They check the edits too: a type knows its typical piece and puts a ring a little bigger
-than the rest first among its odd ones; a stricter tolerance splits rings of two sizes a looser one groups; pieces are
-moved between types, out to the other pieces of their colour and into a type made by hand, and types merged; paths are
-cut and joined (only at their ends, or to a piece on none); the look-alikes of a piece are those more like it than like
-the rest; and edits made again on the pieces found again give the same shapes. The app's tests draw a framed plot with a
-dotted curve of the axes colour and check through intents that the shapes step finds its dots, that the curves step
-proposes one pattern series of them in order, that a kind said by hand changes the proposal until a series is changed by
-hand, that a piece moved, a shape made and merged, and a path cut stay so when the pieces are found again, that a few
-taller dots are offered together when one is moved, that an emptied shape is not listed and makes no series, and that
-points are taken out, put back and put in, and kept when the pieces are found again.
+The unit tests draw the things a curve mask holds and check how the pieces are grouped: alike pieces are one group however
+they are turned (the dots of a dotted line, rings far apart, and a lone square as big as the dots, which only a person can
+tell is not one), each named by how it looks; pieces like too few others are left over, and each long line is a group of
+its own however like another it is; markers glued onto their line are taken off it; a group knows its typical piece and
+puts a ring a little bigger than the rest first among its odd ones; and a stricter tolerance splits rings of two sizes a
+looser one groups. They check the edits too: two whole groups made one keep the larger's number, a few pieces made one are
+a new group, pieces taken out are left over and put back by joining, edits made again on the pieces found again give the
+same groups, and the pieces similar to a selection are those like one of it. The app's tests draw framed plots and check
+through intents that each line is a group without the frame and a legend dash is left over, that the dots of a dotted
+curve are one group listed first, that pieces are selected, added, toggled and taken away, that a removal and a join stay
+when the pieces are found again and are undone and redone on their step only, that a deleted group is emptied into the
+leftovers, and that the pieces' picture is made again when the groups, the hidden ones or the selection change. For the
+link step they check that a link is made click by click, a double-click (the piece again, then the end) ends it and the
+next click starts another; that a link goes on from either end, loses its last piece or any piece, and takes a piece
+from another link; that links are moved, turned round, deleted, undone and redone on their step only; that only the
+chosen group's pieces are linked; and that the points are written link after link in plot values, refused before the
+calibration and with nothing linked, and the same after the pieces are found again.
 
 `cargo run --release -p plotextract-corpus --example shapes -- image.png [out.png]` does what the wizard does with the dark
-colour of an image (frame cut out, pieces, shapes) and prints the types and paths found, with a picture of the pieces
-coloured by kind. On the first figure of arXiv 2203.15668 (2652 x 2144, a dotted black curve with rotated text along it)
-the classification takes about 30 ms: the curve's 247 dots and double dots are one curve, its text is text.
+colour of an image (frame cut out, pieces, groups) and prints the groups and how many pieces are left over, with a picture
+of the pieces coloured by group.
 
-### Figures from arXiv (`crates/arxiv`)
+### Saving and bringing back the tracing
+
+The wizard's tests trace a dotted plot through every step (an exclude shape, the roles, a tick with its value, a log
+axis, a dot taken out of its group, two links), save the work as JSON text and bring it back on a new wizard. The colours,
+lines and pieces found again give the same groups, links and points, and the work saved again is the same. Work saved
+before the colours were looked at waits for them. The model's tests save a project while an image is traced and load it
+in a fresh window and over the same image: it comes back on its step, with the jobs run. A project whose tracing cannot
+be read opens the image afresh with a warning.
+
+### Tracing real figures (`crates/corpus/examples/real_eval.rs`)
+
+`cargo run --release -p plotextract-corpus --example real_eval -- figure.pdf ...` draws each vector figure so its longer
+side is 1600 pixels and traces it with no hand work: every ink a curve, the darkest the axes too. It prints the pieces
+and groups, and the precision and recall of the points traced against the figure's own paths (within 2 pixels). These
+scores say how much hand work a figure needs, not what a user ends up with.
+
+For that, trace the figure's image in the app and save the project as `<name>.plotextract.json`, next to the PDF or in
+`png/` beside it. `real_eval` then brings the project back as the app does and scores what the links export: the
+precision of their points, and how much of the paths they follow they cover. `../testdata/arxiv_worst` holds the
+eight worst of 40 arXiv figures with their PNGs.
+
+### Figures from arXiv (`crates/adapters/arxiv`)
 
 The unit tests read paper numbers written every way (and refuse paths, other sites and near misses), find the figures a
 set of TeX files draws in order (`\graphicspath`, options with brackets, comments, `\epsfig`), and unpack tars made in
@@ -141,10 +164,10 @@ fetch replaced by another is dropped. One test downloads a real paper and is ign
 cargo test -p plotextract-arxiv -- --ignored
 ```
 
-### Responsiveness of the tracing wizard (`crates/app/src/bench.rs`)
+### Responsiveness of the tracing wizard (`crates/ui/src/bench.rs`)
 
 ```
-cargo test --release -p plotextract how_responsive -- --ignored --nocapture
+cargo test --release -p plotextract-ui how_responsive -- --ignored --nocapture
 ```
 
 takes an image through the wizard as a person would and times each background job, the work done on the window's
@@ -162,17 +185,30 @@ that split the wizard into its steps:
 | of which the pieces (each colour labelled within its own bounds, the colours in parallel) | 228 ms | 59 ms |
 | of which the shapes (every piece's look in one pass; a quick test before looking for markers glued to a line) | 73 ms | 26 ms |
 | entering the curves step: the search run again with nothing changed | 298 ms | not run |
-| window: entering the curves step (proposals, tracing) | 11 ms | 11 ms |
+| window: entering the curves step (tracing; the proposals since removed) | 11 ms | 11 ms |
 | window: taking a point out of the biggest series (one series traced again, not all) | 7.1 ms | 4.0 ms |
 | frame after a point is put in (the pieces' picture is kept) | | 0.2 ms |
 | frame after a piece is taken out (the pieces' picture made again) | | 3.2 ms |
 | first frame of a step, fitted, eight colours shown | 31 ms | 31 ms |
 | any other frame | | 0.2 ms or less |
 
+The same figure with the groups and links steps, before and after the pictures of the pieces were made on every core
+and each piece's centre found once, on the search's thread (release build, 16 threads):
+
+| Work | Before | After |
+|---|---|---|
+| first frame of the shapes step, fitted | 21 ms | 12 ms |
+| frame after the biggest group is selected | 35 ms | 15 ms |
+| frame after a piece is taken out of it | 17 ms | 7 ms |
+| window: the points of the links, each frame | 4.2 ms | 0.0 ms |
+| window: taking the pieces of a search | 0.0 ms | 0.0 ms (the centres found on the thread) |
+| first frame of the links step, fitted | | 12 ms |
+| window: linking 500 pieces, a click each | | 0.6 ms |
+
 ### Frame cost
 
 ```
-cargo test --release -p plotextract how_long_a_frame -- --ignored --nocapture
+cargo test --release -p plotextract-ui how_long_a_frame -- --ignored --nocapture
 ```
 
 records and tessellates one canvas frame for three large synthetic figures, fitted and zoomed in. Before and after the
@@ -187,5 +223,5 @@ level-of-detail work (ms per frame):
 ## Adding a stress case
 
 Add the file to `make_stress.py`, then a test to `stress.rs` that names the outcome it must have (opens, is refused, is
-cut short, is stopped). Prefer a hand-written file in a unit test when the case is small: `crates/workspace` builds
+cut short, is stopped). Prefer a hand-written file in a unit test when the case is small: `crates/usecases` builds
 multi-page and damaged PDFs in memory, so those run everywhere.

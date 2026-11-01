@@ -7,7 +7,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use plotextract_core::{Figure, ImportError, Importer, OpenOptions, PictureSource};
+use plotextract_domain::{Figure, ImportError, OpenOptions};
+use plotextract_ports::{Importer, PictureSource};
 
 /// Read a figure with an importer, as the app does for page 1.
 pub fn import(importer: &dyn Importer, bytes: &[u8]) -> Result<Figure, ImportError> {
@@ -37,4 +38,19 @@ pub fn fixture(rel: &str) -> Option<Vec<u8>> {
             None
         }
     }
+}
+
+/// Every format the program reads, as the composition root registers them.
+pub fn registry() -> plotextract_usecases::Registry {
+    plotextract_usecases::Registry::new(vec![
+        std::sync::Arc::new(plotextract_pdf::PdfImporter),
+        std::sync::Arc::new(plotextract_svg::SvgImporter),
+        std::sync::Arc::new(plotextract_ps::PsImporter),
+        std::sync::Arc::new(plotextract_image::RasterImporter),
+    ])
+}
+
+/// The library of figures on the local disk, with every format.
+pub fn library() -> plotextract_usecases::Workspace {
+    plotextract_usecases::Workspace::new(registry(), std::sync::Arc::new(plotextract_fs::LocalFiles))
 }

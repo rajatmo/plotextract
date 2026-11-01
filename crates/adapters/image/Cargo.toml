@@ -1,0 +1,17 @@
+[package]
+name = "plotextract-image"
+description = "Raster images as a file format: PNG, JPEG, GIF, BMP, TIFF and WebP opened as figures to trace, and drawn"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+plotextract-domain.workspace = true
+plotextract-ports.workspace = true
+plotextract-algo.workspace = true
+plotextract-import.workspace = true
+image.workspace = true
+kurbo.workspace = true
+rayon.workspace = true

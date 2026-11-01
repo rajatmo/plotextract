@@ -38,7 +38,7 @@ if [[ "$platform" == macos-* ]]; then
   app="$dest/plotextract.app/Contents"
   mkdir -p "$app/MacOS" "$app/Resources"
   cp "$target/release/plotextract" "$app/MacOS/"
-  cp "$repo/crates/app/assets/icon.icns" "$app/Resources/"
+  cp "$repo/crates/ui/assets/icon.icns" "$app/Resources/"
   cat >"$app/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

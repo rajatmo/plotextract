@@ -1,0 +1,13 @@
+[package]
+name = "plotextract-ports"
+description = "The ports: the traits through which file formats, papers and files reach the use cases"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+plotextract-domain.workspace = true
+kurbo.workspace = true
+thiserror.workspace = true

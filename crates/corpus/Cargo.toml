@@ -9,15 +9,18 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-plotextract-core.workspace = true
-
-[dev-dependencies]
-plotextract-import.workspace = true
+plotextract-domain.workspace = true
+plotextract-ports.workspace = true
+plotextract-usecases.workspace = true
 plotextract-pdf.workspace = true
 plotextract-ps.workspace = true
 plotextract-svg.workspace = true
-plotextract-workspace.workspace = true
-plotextract-raster.workspace = true
+plotextract-image.workspace = true
+plotextract-fs.workspace = true
+
+[dev-dependencies]
+plotextract-import.workspace = true
+plotextract-algo.workspace = true
 image.workspace = true
 kurbo.workspace = true
 serde.workspace = true

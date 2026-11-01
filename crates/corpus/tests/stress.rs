@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
-use plotextract_core::{ImportError, OpenOptions};
 use plotextract_corpus::data_dir;
-use plotextract_workspace::{Opened, Workspace, WorkspaceError};
+use plotextract_domain::{ImportError, OpenOptions};
+use plotextract_usecases::{Opened, WorkspaceError};
 
 /// How long any file may take to open.
 const LIMIT: Duration = Duration::from_secs(90);
@@ -30,7 +30,7 @@ fn open(name: &str, options: OpenOptions) -> Option<(Result<Opened, WorkspaceErr
     let (tx, rx) = channel();
     std::thread::spawn(move || {
         let t = Instant::now();
-        let result = std::panic::catch_unwind(|| Workspace::default().open(&path, options));
+        let result = std::panic::catch_unwind(|| plotextract_corpus::library().open(&path, options));
         let _ = tx.send((result, t.elapsed()));
     });
     match rx.recv_timeout(LIMIT) {

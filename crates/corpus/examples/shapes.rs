@@ -1,16 +1,17 @@
 //! Find the shapes the dark (axes and text) colour of an image is drawn with, as the wizard's Shapes step does: cut the
-//! frame out, break the colour into pieces, group them into shape types and chain the dash patterns. Say what was found
-//! and how long it took, and write a picture of the pieces coloured by kind.
+//! frame out, break the colour into pieces and group them. Say what was found and how long it took, and write a picture
+//! of the pieces coloured by group (the leftovers grey).
 //!
 //!     cargo run --release -p plotextract-corpus --example shapes -- image.png [out.png]
 
 use std::time::Instant;
 
 use image::{Rgba, RgbaImage};
-use plotextract_raster::curves::{self, Source};
-use plotextract_raster::lines::{self, Algorithm, Line, Orientation};
-use plotextract_raster::shapes::{self, Kind};
-use plotextract_raster::{ColourParams, Mask, Prepare, analyse_colours, decode};
+use plotextract_algo::curves::{self, Source};
+use plotextract_algo::lines::{self, Algorithm, Line, Orientation};
+use plotextract_algo::shapes;
+use plotextract_algo::{ColourParams, analyse_colours, decode};
+use plotextract_domain::{Mask, Prepare};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -66,11 +67,13 @@ fn main() {
         cut.len(),
         pieces.pieces().len()
     );
-    for t in &shapes.types {
+    for (k, t) in shapes.groups() {
         let l = &t.look;
         println!(
-            "  {:6?} x{:<4} area {:6.0}  {:5.1} x {:5.1}  filled {:.2}  upright {:.2}  holes {}  stroke {:4.1}  spacing {}",
-            t.kind,
+            "  group {:<3} {:12} x{:<4} area {:6.0}  {:5.1} x {:5.1}  filled {:.2}  upright {:.2}  holes {}  stroke {:4.1}  \
+             spacing {}",
+            k + 1,
+            t.form().name(),
             t.members.len(),
             l.area,
             l.length,
@@ -82,42 +85,15 @@ fn main() {
             t.spacing.map_or("-".into(), |s| format!("{s:.1}"))
         );
     }
-    for (k, chain) in shapes.chains.iter().enumerate() {
-        let letters: String = chain
-            .iter()
-            .map(|&p| match shapes.kind(p) {
-                Some(Kind::Dot) => '.',
-                Some(Kind::Dash) => '-',
-                _ => '?',
-            })
-            .collect();
-        let (first, last) = (shapes.looks[chain[0]].centre, shapes.looks[chain[chain.len() - 1]].centre);
-        println!(
-            "  chain {k}: {} pieces from ({:.0}, {:.0}) to ({:.0}, {:.0}): {}",
-            chain.len(),
-            first.x,
-            first.y,
-            last.x,
-            last.y,
-            letters
-        );
-    }
+    println!("  {} pieces left over", shapes.leftovers().len());
     if let Some(out) = args.get(1) {
         let mut picture = RgbaImage::from_pixel(image.width(), image.height(), Rgba([255, 255, 255, 255]));
-        let colour = |kind: Kind| match kind {
-            Kind::Dot => [220, 0, 0],
-            Kind::Dash => [240, 130, 0],
-            Kind::Marker => [0, 110, 230],
-            Kind::Line => [0, 150, 60],
-            Kind::Text => [150, 150, 150],
-            Kind::Other => [200, 0, 200],
-        };
+        const PALETTE: [[u8; 3]; 6] =
+            [[220, 0, 0], [240, 130, 0], [0, 110, 230], [0, 150, 60], [200, 0, 200], [0, 170, 170]];
         for y in crop.y..crop.y + crop.height {
             for x in crop.x..crop.x + crop.width {
-                if let Some(p) = pieces.at(x, y)
-                    && let Some(kind) = shapes.kind(p)
-                {
-                    let [r, g, b] = colour(kind);
+                if let Some(p) = pieces.at(x, y) {
+                    let [r, g, b] = shapes.type_of[p].map_or([150, 150, 150], |k| PALETTE[k % PALETTE.len()]);
                     picture.put_pixel(x, y, Rgba([r, g, b, 255]));
                 }
             }

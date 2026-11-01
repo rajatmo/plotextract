@@ -4,7 +4,8 @@
 
 use std::time::Instant;
 
-use plotextract_raster::{ColourParams, Prepare, analyse_colours, decode};
+use plotextract_algo::{ColourParams, analyse_colours, decode};
+use plotextract_domain::Prepare;
 
 fn main() {
     let path = std::env::args().nth(1).expect("usage: colours <image>");

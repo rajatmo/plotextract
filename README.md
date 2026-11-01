@@ -37,21 +37,25 @@ with an eye to show or hide each one; the right panel is the step you are on.
 
 1. **Crop and mask.** Drag out the plot, and paint over anything that is not part of it, such as a legend or a colour bar.
 2. **Colours.** The colours of the image are found. Say what each one is: *curve*, *fill*, *axes* or *grid*, or several
-   (black is often both the axes and a curve). Hover the image to see where a colour is used.
+   (black is often both the axes and a curve). Nothing is guessed; a colour you say nothing about is ignored. Hover the
+   image to see where a colour is used.
 3. **Plot area.** Straight lines are found in the axes colour. Click a tick's line for each of the four ticks and type
    its value.
-4. **Shapes.** The curve colours are broken into pieces, and alike pieces are grouped into shapes: the **dots** or
-   **dashes** of a dotted or dashed curve, **markers**, solid **lines**, **text**, and **other**. So a dotted curve drawn
-   in the same black as the axes and the labels comes out on its own. Each shape is listed with a picture of a typical
-   piece; hover a piece to see what it is and why. Fix what the grouping got wrong:
-   - **Select**: say what a shape is (right-click, or keys 1 to 6). Step through its pieces from the oddest one (N), where
-     mistakes collect. You can also zoom to a shape, show it alone, or merge it into another.
-   - **Move**: click a piece to put it in the selected shape or take it out, or drag around many. Moving one piece offers
-     to move the pieces that look like it too.
-   - **Links**: dots and dashes are linked along their curve. Click a wrong link to cut it, or click two ends to join them.
-5. **Curves.** A series is proposed for each dotted or dashed curve, each set of markers and the solid lines. Click
-   pieces to add or remove them; with *Points*, click a stray point to remove it, or click where one is missing to add it.
-   Then *Copy* or *Save CSV*.
+4. **Shapes.** The curve colours are broken into pieces, and pieces are grouped by how they look, by measure alone: each
+   long stroke is a **line**, and many pieces alike (dots, dashes, markers) are a **repeated shape**; the few like no
+   other are left in **no group**. Every piece is drawn in its group's colour over the darkened image and ringed when it
+   is small, so even a one-pixel piece is seen; hold H to see the image alone. A measure can see one drawing as two
+   groups, or put in a group pieces that do not belong. Fix it with a selection and two buttons:
+   - **Select**: click a piece to select its group, Shift+click to add another group, Ctrl+click for one piece; or drag
+     around pieces (Shift adds, Alt takes away). A group's row in the list selects it too.
+   - **Make one group** (G): the selected pieces become one group, and nothing else is in it.
+   - **Remove** (Delete): the selected pieces leave their groups.
+   - *Select similar* (S) adds the pieces that look like those selected; Ctrl+Z undoes a change.
+5. **Link.** Choose the group of a curve, then link its pieces in the order the curve runs, as with a pen drawing a
+   polyline: click a piece to start a link, click the next ones (or drag through them), double-click or press Esc to
+   end it. The next click starts another link; a click on an end of a link goes on with it. Pieces still to link are
+   ringed. In the panel the links can be put in order, turned round or deleted. *Copy* or *Save CSV* writes the centre
+   of every linked piece in plot values, link after link.
 
 Your changes are kept when you go back a step and the image is looked at again.
 
@@ -65,11 +69,12 @@ When the authors submitted a PDF, EPS or SVG figure, you get its exact vector pa
 
 | | |
 |---|---|
-| Drag, mouse wheel | move and zoom the view (the middle button moves it while pieces are being moved) |
+| Drag, mouse wheel | move and zoom the view (on the Shapes step a drag selects pieces; the middle button moves the view) |
 | Ctrl+0 | fit the page |
 | Ctrl+Z, Ctrl+Shift+Z | undo and redo |
-| Ctrl+S | for a vector figure, save the project: calibration, series and page (*File > Open project* reopens it with its figure) |
-| Up, Down, 1 to 6, N, S, Z | on the Shapes step: select a shape, say what it is, go to its next odd piece, show it alone, zoom to it |
+| Ctrl+S | save the project: for a vector figure its calibration, series and page; for an image all the wizard's work (crop, masks, colours, ticks, groups, links). *File > Open project* reopens it with its figure |
+| G, Delete, S, Z, Esc, H | on the Shapes step: make the selection one group, remove it from its groups, add the pieces like it, zoom to it, let go of it; hold H to see the image alone |
+| Esc, Backspace | on the Link step: end the link being made, take its last piece off |
 | F1 | About |
 
 ## Good to know

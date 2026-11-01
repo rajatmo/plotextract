@@ -1,56 +1,39 @@
+//! The composition root: the one place that knows every concrete piece. It builds the adapters (the file formats,
+//! arXiv, the local disk), hands them to the model through their ports, and runs the window.
+
 // A release build on Windows is a GUI program: no console window behind it.
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
-mod about;
-mod app;
-mod arxiv_window;
-#[cfg(test)]
-mod bench;
-mod canvas;
-mod colours;
-mod cursor;
-mod detail;
-mod jobs;
-mod model;
-mod panel;
-mod text;
-mod theme;
-mod view;
-mod wizard;
-mod wizard_canvas;
-mod wizard_panel;
-
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::Parser;
+use plotextract_arxiv::{Arxiv, ArxivPapers, cache_dir};
+use plotextract_model::Model;
+use plotextract_usecases::{Registry, Workspace};
 
 /// Pick curves from plots and export them as data in plot units.
 #[derive(Parser)]
 #[command(version, author)]
 struct Args {
-    /// A plot to open (PDF, SVG, EPS or PostScript).
+    /// A plot to open (PDF, SVG, EPS, PostScript or an image).
     file: Option<PathBuf>,
 }
 
-/// The smallest window, in points: the fixed-width side panel plus room for the page, and a menu bar and status bar
-/// above and below.
-const MIN_WINDOW: [f32; 2] = [800.0, 560.0];
-
-/// The window and taskbar icon.
-fn icon() -> egui::IconData {
-    eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).expect("the bundled icon is a valid PNG")
+/// The file formats the program reads, in the order they are asked.
+fn registry() -> Registry {
+    Registry::new(vec![
+        Arc::new(plotextract_pdf::PdfImporter),
+        Arc::new(plotextract_svg::SvgImporter),
+        Arc::new(plotextract_ps::PsImporter),
+        Arc::new(plotextract_image::RasterImporter),
+    ])
 }
 
-fn main() -> eframe::Result {
+fn main() -> plotextract_ui::Result {
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).init();
     let args = Args::parse();
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 760.0])
-            .with_min_inner_size(MIN_WINDOW)
-            .with_title("plotextract")
-            .with_icon(icon()),
-        ..Default::default()
-    };
-    eframe::run_native("plotextract", options, Box::new(|cc| Ok(Box::new(app::App::new(cc, args.file)))))
+    let workspace = Workspace::new(registry(), Arc::new(plotextract_fs::LocalFiles));
+    let papers = Arc::new(ArxivPapers::new(Arc::new(Arxiv), cache_dir()));
+    plotextract_ui::run(Model::new(workspace, papers), args.file)
 }

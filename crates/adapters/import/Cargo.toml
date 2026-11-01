@@ -1,0 +1,12 @@
+[package]
+name = "plotextract-import"
+description = "Shared helpers for the file-format importers: path flattening and the primitive builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+plotextract-domain.workspace = true
+kurbo.workspace = true

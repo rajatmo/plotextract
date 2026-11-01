@@ -9,8 +9,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use kurbo::Rect;
-use plotextract_core::OpenOptions;
-use plotextract_workspace::Workspace;
+use plotextract_domain::OpenOptions;
 
 fn main() {
     let path = PathBuf::from(std::env::args().nth(1).expect("usage: probe <file> [page]"));
@@ -33,8 +32,9 @@ fn main() {
 
 fn run(path: &std::path::Path, page: usize) -> Result<(), String> {
     let t = Instant::now();
-    let opened =
-        Workspace::default().open(path, OpenOptions { page, ..Default::default() }).map_err(|e| e.to_string())?;
+    let opened = plotextract_corpus::library()
+        .open(path, OpenOptions { page, ..Default::default() })
+        .map_err(|e| e.to_string())?;
     let (n, points) = {
         let f = &opened.session.figure;
         (f.primitives.len(), f.primitives.iter().map(|p| p.points.len()).sum::<usize>())

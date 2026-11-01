@@ -1,0 +1,18 @@
+[package]
+name = "plotextract-algo"
+description = "The algorithms that trace an image: its ink colours, straight lines, pieces and their groups; pure, no I/O"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+plotextract-domain.workspace = true
+image.workspace = true
+kurbo.workspace = true
+rayon.workspace = true
+imageproc.workspace = true
+lsdetect.workspace = true
+serde.workspace = true
+thiserror.workspace = true

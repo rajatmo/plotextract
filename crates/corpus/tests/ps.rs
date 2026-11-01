@@ -1,8 +1,9 @@
 //! The PostScript importer on a matplotlib figure (4 x 3 inches: an &eps with a 288 x 216 pt bounding box).
 
 use kurbo::Rect;
-use plotextract_core::{Bitmap, Importer, PrimitiveKind, Unit};
 use plotextract_corpus::{fixture, import, picture};
+use plotextract_domain::{Bitmap, PrimitiveKind, Unit};
+use plotextract_ports::Importer;
 use plotextract_ps::PsImporter;
 
 /// Pixels per point of the reference picture.
