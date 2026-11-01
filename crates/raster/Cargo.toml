@@ -1,6 +1,6 @@
 [package]
 name = "plotextract-raster"
-description = "Raster image decoding and shape detection (filters, morphology, contours) with tunable overlays"
+description = "Raster images: decoding, drawing, and the preparation (crop and mask) the tracing wizard starts from"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,9 +9,10 @@ authors.workspace = true
 
 [dependencies]
 plotextract-core.workspace = true
+plotextract-import.workspace = true
 image.workspace = true
-tiff.workspace = true
-imageproc.workspace = true
-ndarray.workspace = true
+kurbo.workspace = true
 rayon.workspace = true
+imageproc.workspace = true
+lsdetect.workspace = true
 thiserror.workspace = true

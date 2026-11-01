@@ -3,30 +3,37 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender, channel};
 
 use egui::{Align, Color32, Context, Key, Layout, Modifiers, RichText, Ui, vec2};
 use plotextract_core::format_g;
 
+use crate::arxiv_window::ArxivWindow;
 use crate::canvas::{self, CanvasState};
-use crate::model::{Effect, Intent, Level, Loaded, Model};
+use crate::jobs::{Answer, Runner};
+use crate::model::{Effect, Intent, Level, Model};
 use crate::panel::{self, PanelState};
 use crate::text::{curve_label, measure};
+use crate::wizard_panel::WizardPanel;
 use crate::{about, theme};
 
 /// The side panel's width, in points. It does not resize: the cards inside are laid out for it.
 const SIDE_PANEL_WIDTH: f32 = 340.0;
+/// The widths of the wizard's panels: the masks on the left, the step on the right.
+const MASKS_PANEL_WIDTH: f32 = 290.0;
+const STEP_PANEL_WIDTH: f32 = 320.0;
 
 pub struct App {
     model: Model,
     canvas: CanvasState,
     panel: PanelState,
+    wizard_panel: WizardPanel,
     icon: egui::TextureHandle,
     show_about: bool,
     /// Intents raised by widgets drawn after the frame's intents were run (the welcome screen), run next frame.
     deferred: Vec<Intent>,
-    /// Files being opened on background threads send their answers here.
-    loads: (Sender<Loaded>, Receiver<Loaded>),
+    /// The slow work the model asked for, running on other threads.
+    jobs: Runner,
+    arxiv_window: ArxivWindow,
     /// What is typed in the password prompt.
     password: String,
 }
@@ -43,10 +50,12 @@ impl App {
             model: Model::default(),
             canvas: CanvasState::default(),
             panel: PanelState::default(),
+            wizard_panel: WizardPanel::default(),
             icon,
             show_about: false,
             deferred: Vec::new(),
-            loads: channel(),
+            jobs: Runner::default(),
+            arxiv_window: ArxivWindow::default(),
             password: String::new(),
         };
         if let Some(path) = path {
@@ -65,11 +74,16 @@ impl App {
         }
     }
 
-    /// Give the model the files that finished opening.
-    fn receive_loads(&mut self, ctx: &Context) {
-        while let Ok(loaded) = self.loads.1.try_recv() {
+    /// Give the answers of the jobs that finished to the model (a figure's picture to the arXiv window), and do what they
+    /// ask for next.
+    fn receive_answers(&mut self, ctx: &Context) {
+        for answer in self.jobs.answers() {
+            if let Answer::Thumbnail(thumbnail) = answer {
+                self.arxiv_window.receive(ctx, thumbnail);
+                continue;
+            }
             let mut queue = VecDeque::new();
-            for effect in self.model.finish_load(loaded) {
+            for effect in self.model.finish(answer) {
                 self.perform(ctx, effect, &mut queue);
             }
             while let Some(intent) = queue.pop_front() {
@@ -98,12 +112,13 @@ impl App {
                 then.extend(dialog.save_file().map(Intent::WriteCsv));
             }
             Effect::CopyText(text) => ctx.copy_text(text),
-            Effect::Load(job) => {
-                let (done, ctx) = (self.loads.0.clone(), ctx.clone());
-                std::thread::spawn(move || {
-                    let _ = done.send(job.run());
-                    ctx.request_repaint();
-                });
+            Effect::Run(job) => {
+                let ctx = ctx.clone();
+                self.jobs.run(job, move || ctx.request_repaint());
+            }
+            Effect::RunBatch(jobs) => {
+                let ctx = ctx.clone();
+                self.jobs.run_batch(jobs, move || ctx.request_repaint());
             }
             Effect::Opened { title, source } => {
                 if let Some(session) = self.model.session() {
@@ -118,6 +133,11 @@ impl App {
                 }
             }
             Effect::FitView => self.canvas.view.request_fit(),
+            Effect::ShowArea(area) => {
+                if let Some(s) = self.model.session() {
+                    self.canvas.view.show(area, (s.figure.width, s.figure.height));
+                }
+            }
             Effect::ToggleAbout => self.show_about = !self.show_about,
             Effect::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
@@ -169,6 +189,7 @@ impl App {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 item(ui, true, "Open\u{2026}", "Ctrl+O", Intent::RequestOpen);
+                item(ui, true, "Import from arXiv\u{2026}", "", Intent::RequestArxiv);
                 ui.separator();
                 item(ui, true, "Open project\u{2026}", "", Intent::RequestLoadProject);
                 item(ui, has_figure, "Save project\u{2026}", "Ctrl+S", Intent::RequestSaveProject);
@@ -257,6 +278,11 @@ impl App {
                 self.deferred.push(Intent::RequestOpen);
                 ui.ctx().request_repaint();
             }
+            ui.add_space(4.0);
+            if ui.add_sized([180.0, 30.0], egui::Button::new("Import from arXiv\u{2026}")).clicked() {
+                self.deferred.push(Intent::RequestArxiv);
+                ui.ctx().request_repaint();
+            }
             ui.add_space(8.0);
             theme::hint(ui, "or drop a PDF, SVG, EPS or PostScript file on the window");
         });
@@ -312,7 +338,7 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        self.receive_loads(&ctx);
+        self.receive_answers(&ctx);
         let mut intents = std::mem::take(&mut self.deferred);
 
         if let Some(path) = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf())) {
@@ -324,16 +350,44 @@ impl eframe::App for App {
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui, &mut intents));
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         let panel_frame = egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(12));
-        egui::Panel::right("side")
-            .resizable(false)
-            .exact_size(SIDE_PANEL_WIDTH)
-            .frame(panel_frame)
-            .show(ui, |ui| intents.extend(panel::show(ui, &self.model, &mut self.panel)));
+        match self.model.wizard() {
+            // tracing an image: the masks made so far on the left, the step on the right
+            Some(wizard) => {
+                let lit = self.canvas.hovered_ink();
+                let mut hover = None;
+                egui::Panel::left("masks").resizable(false).exact_size(MASKS_PANEL_WIDTH).frame(panel_frame).show(
+                    ui,
+                    |ui| {
+                        let out = self.wizard_panel.masks(ui, wizard, lit);
+                        hover = out.row_hover;
+                        intents.extend(out.intents);
+                    },
+                );
+                egui::Panel::right("step").resizable(false).exact_size(STEP_PANEL_WIDTH).frame(panel_frame).show(
+                    ui,
+                    |ui| {
+                        let out = self.wizard_panel.step(ui, wizard, lit);
+                        hover = hover.or(out.row_hover);
+                        intents.extend(out.intents);
+                    },
+                );
+                // the mask whose row the pointer is on is outlined on the image
+                self.canvas.set_panel_hover(hover);
+            }
+            None => {
+                egui::Panel::right("side")
+                    .resizable(false)
+                    .exact_size(SIDE_PANEL_WIDTH)
+                    .frame(panel_frame)
+                    .show(ui, |ui| intents.extend(panel::show(ui, &self.model, &mut self.panel)));
+            }
+        }
         egui::CentralPanel::default().show(ui, |ui| match self.model.session() {
-            Some(session) => intents.extend(canvas::show(ui, session, &mut self.canvas)),
+            Some(session) => intents.extend(canvas::show(ui, session, &mut self.canvas, self.model.wizard())),
             None => self.welcome(ui),
         });
         about::window(&ctx, &mut self.show_about, self.icon.id());
+        self.arxiv_window.show(&ctx, self.model.arxiv(), &mut intents);
         self.password_prompt(&ctx, &mut intents);
 
         if !intents.is_empty() {

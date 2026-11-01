@@ -3,13 +3,22 @@
 
 mod about;
 mod app;
+mod arxiv_window;
+#[cfg(test)]
+mod bench;
 mod canvas;
+mod colours;
+mod cursor;
 mod detail;
+mod jobs;
 mod model;
 mod panel;
 mod text;
 mod theme;
 mod view;
+mod wizard;
+mod wizard_canvas;
+mod wizard_panel;
 
 use std::path::PathBuf;
 

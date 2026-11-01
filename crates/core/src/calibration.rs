@@ -13,7 +13,7 @@ pub enum Axis {
 }
 
 /// One of the four reference ticks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Slot {
     XMin,
     XMax,

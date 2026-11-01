@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -22,6 +22,7 @@ plotextract-pdf = { path = "crates/pdf" }
 plotextract-ps = { path = "crates/ps" }
 plotextract-svg = { path = "crates/svg" }
 plotextract-raster = { path = "crates/raster" }
+plotextract-arxiv = { path = "crates/arxiv" }
 
 # PDF
 hayro = "0.8"
@@ -41,10 +42,14 @@ kurbo = "0.13"
 
 # raster
 image = "0.25"
-tiff = "0.11"
 imageproc = "0.27"
-ndarray = "0.17"
+lsdetect = "0.4"
 rayon = "1.12"
+
+# arXiv sources: the download and the archive
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
+flate2 = "1.1"
+tar = "0.4.46"
 
 # Windows executable icon
 winresource = "0.1"

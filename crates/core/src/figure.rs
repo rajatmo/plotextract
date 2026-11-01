@@ -92,6 +92,11 @@ pub trait Importer: Send + Sync {
 
     fn import(&self, bytes: &Arc<Vec<u8>>, options: &OpenOptions) -> Result<Figure, ImportError>;
 
+    /// Whether the file holds pixels rather than paths: its figure has no primitives until the image is traced.
+    fn needs_tracing(&self) -> bool {
+        false
+    }
+
     /// A source of pictures of the same page, created on the thread that will use it (the renderers of some formats
     /// cannot move between threads). `None` when the format has no picture to draw.
     fn picture(&self, _bytes: &Arc<Vec<u8>>, _options: &OpenOptions) -> Option<Box<dyn PictureSource>> {

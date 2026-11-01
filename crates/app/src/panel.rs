@@ -16,13 +16,13 @@ use crate::theme::{self, Badge, Btn, FILL_COLOR, MEMBER_COLOR, OK, STROKE_COLOR}
 
 const TABLE_ROW: f32 = 22.0;
 /// The first column of the grids (row names), in points.
-const NAME_COL: f32 = 54.0;
+pub(crate) const NAME_COL: f32 = 54.0;
 /// The position column of the calibration grid.
-const POSITION_COL: f32 = 70.0;
-const GRID_GAP: f32 = 8.0;
+pub(crate) const POSITION_COL: f32 = 70.0;
+pub(crate) const GRID_GAP: f32 = 8.0;
 /// The first column of the selection grid.
 const SELECTION_NAME_COL: f32 = 56.0;
-const FIELD_HEIGHT: f32 = 24.0;
+pub(crate) const FIELD_HEIGHT: f32 = 24.0;
 
 /// What the panel's widgets remember between frames.
 #[derive(Default)]
@@ -173,20 +173,7 @@ fn calibration_section(
                     ui.label(RichText::new("\u{2013}").weak());
                 }
             });
-            let field =
-                egui::TextEdit::singleline(&mut state.values[i]).hint_text("value").align(egui::Align2::LEFT_CENTER);
-            let changed = ui
-                .scope(|ui| {
-                    if axis_ok[i / 2] {
-                        let widgets = &mut ui.visuals_mut().widgets;
-                        for state in [&mut widgets.inactive, &mut widgets.hovered] {
-                            state.bg_stroke = Stroke::new(1.5, OK);
-                        }
-                    }
-                    ui.add_sized([value_width, FIELD_HEIGHT], field).changed()
-                })
-                .inner;
-            if changed {
+            if value_field(ui, &mut state.values[i], value_width, axis_ok[i / 2]) {
                 intents.push(Intent::Edit(Edit::SetValue(slot, parse_value(&state.values[i]))));
             }
             ui.end_row();
@@ -407,8 +394,23 @@ fn selection_section(ui: &mut Ui, session: &Session) {
     });
 }
 
+/// The box a tick's plot value is typed in, outlined in green when its axis is calibrated. Whether the text changed.
+pub(crate) fn value_field(ui: &mut Ui, text: &mut String, width: f32, calibrated: bool) -> bool {
+    let field = egui::TextEdit::singleline(text).hint_text("value").align(egui::Align2::LEFT_CENTER);
+    ui.scope(|ui| {
+        if calibrated {
+            let widgets = &mut ui.visuals_mut().widgets;
+            for state in [&mut widgets.inactive, &mut widgets.hovered] {
+                state.bg_stroke = Stroke::new(1.5, OK);
+            }
+        }
+        ui.add_sized([width, FIELD_HEIGHT], field).changed()
+    })
+    .inner
+}
+
 /// A grid cell of a fixed width, its content vertically centred.
-fn cell(ui: &mut Ui, width: f32, add_contents: impl FnOnce(&mut Ui)) {
+pub(crate) fn cell(ui: &mut Ui, width: f32, add_contents: impl FnOnce(&mut Ui)) {
     ui.allocate_ui_with_layout(vec2(width, FIELD_HEIGHT), Layout::left_to_right(Align::Center), |ui| {
         ui.set_min_width(width);
         add_contents(ui);

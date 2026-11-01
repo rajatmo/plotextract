@@ -11,6 +11,15 @@ the series.
 Right click: record the selected point as x min / x max / y min / y max, then type its plot value in the side panel.
 Export CSV or Copy numbers write the active series as x,y.
 
+A raster image (PNG, JPEG, GIF, BMP, TIFF, WebP) opens in the tracing wizard: crop and mask, the colours, the four ticks
+with the plot value of each, the shapes the curves are drawn with (dots, dashes, markers, lines, text; fix any the app
+got wrong by moving pieces between shapes, or cutting and joining the links of a dotted curve), and the curves:
+a series is proposed for each, you take stray points out and put missed ones in, and it is copied or saved as CSV in plot
+values. The masks you make appear on the left, the step and its choices on the right.
+
+File > Import from arXiv takes a paper's number (2301.01234) or a link to it, downloads its source from arXiv and shows
+every figure in it; choose one and Import to open it. The figures are kept in your cache folder (plotextract\arxiv).
+
 A document with several pages opens at page 1. Move between pages with the Page control at the top of the side panel or
 with Page Up / Page Down; work on a page is kept while you look at others. A password protected PDF asks for its password.
 

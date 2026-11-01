@@ -10,10 +10,9 @@ authors.workspace = true
 [dependencies]
 plotextract-core.workspace = true
 plotextract-pdf.workspace = true
+plotextract-raster.workspace = true
 plotextract-ps.workspace = true
 plotextract-svg.workspace = true
+kurbo.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-
-[dev-dependencies]
-kurbo.workspace = true

@@ -8,6 +8,8 @@ pub const MAX_ZOOM: f32 = 400.0;
 /// Most zoomed-out view, relative to the figure fitted in the canvas.
 pub const MIN_FIT_FRACTION: f32 = 0.5;
 const FIT_MARGIN: f32 = 8.0;
+/// The least a view shown by [`View::show`] spans, in figure units.
+pub const SHOW_MIN: f32 = 240.0;
 
 pub struct View {
     /// Screen pixels per figure unit.
@@ -87,6 +89,21 @@ impl View {
         self.auto_fit = false;
     }
 
+    /// Zoom and pan to show the figure rectangle `area` in the middle of the canvas, with room around it: at least
+    /// [`SHOW_MIN`] figure units across, so a single small piece is seen among its neighbours.
+    pub fn show(&mut self, area: kurbo::Rect, figure: (f64, f64)) {
+        let canvas = self.canvas_size;
+        if canvas.x <= 0.0 || canvas.y <= 0.0 {
+            return;
+        }
+        let (w, h) = ((area.width() as f32).max(SHOW_MIN), (area.height() as f32).max(SHOW_MIN));
+        let min = Self::fit_zoom(canvas, figure) * MIN_FIT_FRACTION;
+        self.zoom = ((canvas.x / w).min(canvas.y / h) * 0.8).clamp(min, MAX_ZOOM);
+        let centre = area.center();
+        self.offset = canvas / 2.0 - vec2(centre.x as f32, centre.y as f32) * self.zoom;
+        self.auto_fit = false;
+    }
+
     pub fn pan(&mut self, delta: Vec2) {
         self.offset += delta;
         self.auto_fit = false;
@@ -147,6 +164,20 @@ mod tests {
         v.resized(canvas, figure);
         assert_eq!((v.zoom, v.offset), fitted);
         assert!(v.auto_fit);
+    }
+
+    #[test]
+    fn an_area_shown_is_centred_with_room_around_it() {
+        let (canvas, figure) = (vec2(800.0, 600.0), (2000.0, 1000.0));
+        let mut v = View::default();
+        v.fit(canvas, figure);
+        let area = kurbo::Rect::new(1000.0, 500.0, 1010.0, 506.0);
+        v.show(area, figure);
+        let origin = pos2(0.0, 0.0);
+        let centre = v.to_screen(origin, area.center());
+        assert!((centre.x - 400.0).abs() < 1e-3 && (centre.y - 300.0).abs() < 1e-3);
+        assert!((v.zoom - 600.0 / SHOW_MIN * 0.8).abs() < 1e-3, "a small piece is shown among its neighbours");
+        assert!(!v.auto_fit);
     }
 
     #[test]

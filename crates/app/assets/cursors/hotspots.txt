@@ -1,0 +1,6 @@
+cross 16 16
+move 16 16
+resize_h 16 16
+resize_v 16 16
+resize_nwse 16 16
+resize_nesw 16 16

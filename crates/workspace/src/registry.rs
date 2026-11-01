@@ -5,6 +5,7 @@ use std::sync::Arc;
 use plotextract_core::Importer;
 use plotextract_pdf::PdfImporter;
 use plotextract_ps::PsImporter;
+use plotextract_raster::RasterImporter;
 use plotextract_svg::SvgImporter;
 
 /// How many leading bytes a format gets to recognize its file.
@@ -22,7 +23,7 @@ impl Registry {
 
     /// Every format the application ships with.
     pub fn standard() -> Self {
-        Self::new(vec![Arc::new(PdfImporter), Arc::new(SvgImporter), Arc::new(PsImporter)])
+        Self::new(vec![Arc::new(PdfImporter), Arc::new(SvgImporter), Arc::new(PsImporter), Arc::new(RasterImporter)])
     }
 
     /// The importer for a file: by its content, and failing that by its extension.
@@ -42,6 +43,14 @@ impl Registry {
     pub fn extensions(&self) -> Vec<&'static str> {
         self.importers.iter().flat_map(|i| i.extensions().iter().copied()).collect()
     }
+
+    /// Whether a file of this name has an extension that can be opened.
+    pub fn opens_name(&self, name: &str) -> bool {
+        let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
+        let Some((_, ext)) = file.rsplit_once('.') else { return false };
+        let ext = ext.to_ascii_lowercase();
+        self.importers.iter().any(|i| i.extensions().contains(&ext.as_str()))
+    }
 }
 
 #[cfg(test)]
@@ -58,6 +67,8 @@ mod tests {
         assert_eq!(name(&r, b"%PDF-1.7\n", Some("svg")), Some("PDF"));
         assert_eq!(name(&r, b"<?xml version='1.0'?><svg>", None), Some("SVG"));
         assert_eq!(name(&r, b"%!PS-Adobe-3.0 EPSF-3.0", Some("txt")), Some("PostScript"));
+        assert_eq!(name(&r, b"\x89PNG\r\n\x1a\n", Some("svg")), Some("Image"));
+        assert_eq!(name(&r, &[0xFF, 0xD8, 0xFF, 0xE0], None), Some("Image"));
     }
 
     #[test]
@@ -72,8 +83,15 @@ mod tests {
     #[test]
     fn lists_every_extension() {
         let all = Registry::standard().extensions();
-        for ext in ["pdf", "svg", "ps", "eps"] {
+        for ext in ["pdf", "svg", "ps", "eps", "png", "jpg", "jpeg", "tif", "bmp", "gif", "webp"] {
             assert!(all.contains(&ext), "{ext}");
         }
+    }
+
+    #[test]
+    fn names_are_known_by_their_extension() {
+        let r = Registry::standard();
+        assert!(r.opens_name("figs/Loss.PDF") && r.opens_name("a.b/c.eps") && r.opens_name("x.png"));
+        assert!(!r.opens_name("main.tex") && !r.opens_name("figs.png/README") && !r.opens_name("png"));
     }
 }

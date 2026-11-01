@@ -7,7 +7,7 @@ mod registry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use plotextract_core::{ImportError, Importer, OpenOptions, PictureSource, Project, Session, SessionError};
+use plotextract_core::{Bitmap, ImportError, Importer, OpenOptions, PictureSource, Project, Session, SessionError};
 
 pub use registry::Registry;
 
@@ -57,6 +57,16 @@ impl Source {
         self.options.page
     }
 
+    /// Whether the file holds pixels, to be traced into paths before there is anything to pick.
+    pub fn needs_tracing(&self) -> bool {
+        self.importer.needs_tracing()
+    }
+
+    /// The file's bytes, for steps that read the pixels of an image themselves.
+    pub fn bytes(&self) -> &Arc<Vec<u8>> {
+        &self.bytes
+    }
+
     /// The same file at another page.
     pub fn with_page(&self, page: usize) -> Self {
         Self { options: OpenOptions { page, ..self.options.clone() }, ..self.clone() }
@@ -84,6 +94,11 @@ impl Opened {
     /// The source of the figure's pictures, unless the file is so large that drawing it whole would be unreasonable.
     pub fn picture_source(&self) -> Option<Source> {
         (!self.session.figure.truncated).then(|| self.source.clone())
+    }
+
+    /// Whether the figure is empty because the file holds pixels, to be traced.
+    pub fn needs_tracing(&self) -> bool {
+        self.source.needs_tracing()
     }
 
     /// The source, for reopening the file at another page.
@@ -136,6 +151,15 @@ impl Workspace {
         self.load(self.read(path, options)?, Some(path.display().to_string()))
     }
 
+    /// A small picture of the first page of a figure file, `side` pixels on its longer side.
+    pub fn thumbnail(&self, path: &Path, side: u32) -> Result<Bitmap, WorkspaceError> {
+        let opened = self.open(path, OpenOptions::default())?;
+        let f = &opened.session.figure;
+        let mut picture = opened.source.picture().ok_or_else(|| ImportError::message("the file draws no picture"))?;
+        let scale = f64::from(side) / f.width.max(f.height);
+        Ok(picture.render(kurbo::Rect::new(0.0, 0.0, f.width, f.height), scale)?)
+    }
+
     /// A good file name for the project of a session.
     pub fn project_file_name(session: &Session) -> String {
         let stem = session.source.as_deref().and_then(|s| Path::new(s).file_stem()).map(|s| s.to_string_lossy());
@@ -161,6 +185,11 @@ impl Workspace {
 
     pub fn export_csv(&self, session: &Session, series: usize, path: &Path) -> Result<(), WorkspaceError> {
         write(path, self.csv(session, series)?)
+    }
+
+    /// Write CSV text made elsewhere (a series traced from an image) to `path`.
+    pub fn write_csv(&self, path: &Path, csv: String) -> Result<(), WorkspaceError> {
+        write(path, csv)
     }
 }
 
@@ -242,6 +271,17 @@ mod tests {
         assert_eq!(opened.session.figure.primitives.len(), 1);
         assert_eq!(opened.session.figure.unit.symbol(), "px");
         assert_eq!((opened.session.figure.page, opened.session.figure.page_count), (0, 1));
+    }
+
+    #[test]
+    fn a_thumbnail_is_the_page_drawn_small() {
+        let dir = Scratch::new("thumb");
+        let ws = Workspace::default();
+        let wide = SVG.replace(r#"height="100" viewBox="0 0 100 100""#, r#"height="50" viewBox="0 0 100 50""#);
+        let small = ws.thumbnail(&dir.file("wide.svg", wide), 40).unwrap();
+        assert_eq!((small.width, small.height), (40, 20));
+        assert!(small.rgba.chunks(4).any(|p| p[0] < 240), "the line is drawn, faint at this size");
+        assert!(ws.thumbnail(&dir.file("notes.txt", "x"), 40).is_err());
     }
 
     #[test]

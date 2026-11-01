@@ -1,0 +1,14 @@
+[package]
+name = "plotextract-arxiv"
+description = "The figures of an arXiv paper: its source downloaded, unpacked, and its figure files listed in the order the paper uses them"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+ureq.workspace = true
+flate2.workspace = true
+tar.workspace = true
+thiserror.workspace = true

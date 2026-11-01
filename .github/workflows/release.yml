@@ -1,6 +1,6 @@
 name: release
 
-# Builds the app on every platform and keeps the packages as workflow artifacts. Pushing a tag like v0.2.0 also attaches
+# Builds the app on every platform and keeps the packages as workflow artifacts. Pushing a tag like v1.0.0 also attaches
 # them to a GitHub release.
 on:
   push:

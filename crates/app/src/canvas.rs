@@ -8,11 +8,14 @@ use kurbo::Point;
 use plotextract_core::{Axis, Bitmap, Edit, Figure, Hit, Pick, PrimitiveKind, Session, Slot};
 use plotextract_workspace::Source;
 
+use crate::cursor;
 use crate::detail::{self, Kind, Worker};
 use crate::model::Intent;
 use crate::text::{curve_label, measure, slot_label};
 use crate::theme::{FILL_COLOR, GUIDE_COLOR, MEMBER_COLOR, SELECT_COLOR, STROKE_COLOR, TEXT_SIZE};
 use crate::view::{View, marker_pos};
+use crate::wizard::{MaskId, Pen, ShapeClick, Step, Tool, Wizard};
+use crate::wizard_canvas::WizardCanvas;
 
 /// Hover snaps to the nearest vertex within this many screen pixels.
 const SNAP_PX: f32 = 12.0;
@@ -140,6 +143,8 @@ fn screen_runs(piece: &[Point], view: &View, origin: Pos2, clip: egui::Rect) -> 
 /// Everything the canvas remembers between frames.
 pub struct CanvasState {
     pub view: View,
+    /// The wizard's half-finished gestures and the mask picture.
+    wizard: WizardCanvas,
     hover: Option<Hit>,
     base: Option<Picture>,
     detail: Option<Detail>,
@@ -155,6 +160,7 @@ impl Default for CanvasState {
     fn default() -> Self {
         Self {
             view: View::default(),
+            wizard: WizardCanvas::default(),
             hover: None,
             base: None,
             detail: None,
@@ -179,14 +185,25 @@ impl CanvasState {
         }
     }
 
+    /// The colour under the pointer, in the wizard's colour step.
+    pub fn hovered_ink(&self) -> Option<usize> {
+        self.wizard.hovered()
+    }
+
+    /// A colour's row in the wizard's panel is under the pointer: light that colour on the image.
+    pub fn set_panel_hover(&mut self, mask: Option<MaskId>) {
+        self.wizard.set_panel_hover(mask);
+    }
+
     /// The vertex under the pointer, while the select tool is held.
     pub fn hover(&self) -> Option<Hit> {
         self.hover
     }
 }
 
-/// Draw the canvas for a session and return what the user did on it.
-pub fn show(ui: &mut Ui, session: &Session, state: &mut CanvasState) -> Vec<Intent> {
+/// Draw the canvas for a session and return what the user did on it. While an image is being prepared (`wizard`) the
+/// pointer crops and masks instead of picking curves.
+pub fn show(ui: &mut Ui, session: &Session, state: &mut CanvasState, wizard: Option<&Wizard>) -> Vec<Intent> {
     let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let rect = response.rect;
     let origin = rect.min;
@@ -194,7 +211,7 @@ pub fn show(ui: &mut Ui, session: &Session, state: &mut CanvasState) -> Vec<Inte
     state.view.resized(rect.size(), figure_size);
 
     let mods = ui.input(|i| i.modifiers);
-    let select_tool = mods.command;
+    let select_tool = mods.command && wizard.is_none();
 
     // zoom about the cursor, pan with the hand tool
     if let Some(cursor) = response.hover_pos() {
@@ -203,8 +220,11 @@ pub fn show(ui: &mut Ui, session: &Session, state: &mut CanvasState) -> Vec<Inte
             state.view.zoom_about(origin, cursor, (scroll * 0.0015).exp(), figure_size);
         }
     }
-    let panning =
-        (response.dragged_by(PointerButton::Primary) && !select_tool) || response.dragged_by(PointerButton::Middle);
+    let hand = match wizard {
+        Some(w) => WizardCanvas::pans(w),
+        None => !select_tool,
+    };
+    let panning = (response.dragged_by(PointerButton::Primary) && hand) || response.dragged_by(PointerButton::Middle);
     if panning {
         state.view.pan(response.drag_delta());
     }
@@ -212,7 +232,7 @@ pub fn show(ui: &mut Ui, session: &Session, state: &mut CanvasState) -> Vec<Inte
     // claim the cursor while the pointer is really over it, or a pan that began there is still under way.
     if panning {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-    } else if response.hovered() {
+    } else if response.hovered() && (wizard.is_none() || hand) {
         ui.ctx().set_cursor_icon(if select_tool { egui::CursorIcon::Crosshair } else { egui::CursorIcon::Grab });
     }
 
@@ -239,7 +259,21 @@ pub fn show(ui: &mut Ui, session: &Session, state: &mut CanvasState) -> Vec<Inte
         }
     }
 
-    state.paint(&painter, rect, select_tool, session);
+    if let Some(w) = wizard
+        && !panning
+    {
+        intents.extend(state.wizard.interact(ui, &response, &state.view, origin, w));
+    }
+
+    state.paint(&painter, rect, select_tool, session, wizard);
+    if let Some(w) = wizard {
+        state.wizard.paint(&painter.with_clip_rect(rect), &state.view, origin, rect, w);
+        state.wizard.context_menu(&response, w, &mut intents);
+        if response.hovered() || response.dragged() {
+            cursor::replace_system_cursor(ui.ctx());
+        }
+        return intents;
+    }
 
     // the right-click menu records the selected point as a calibration tick
     response.context_menu(|ui| match (session.selection(), session.selected_point()) {
@@ -265,6 +299,9 @@ pub fn show(ui: &mut Ui, session: &Session, state: &mut CanvasState) -> Vec<Inte
             ui.add_enabled(false, egui::Label::new("Select a point first (Ctrl+click on a curve)"));
         }
     });
+    if response.hovered() || response.dragged() {
+        cursor::replace_system_cursor(ui.ctx());
+    }
     intents
 }
 
@@ -329,7 +366,14 @@ impl CanvasState {
         }
     }
 
-    fn paint(&self, painter: &egui::Painter, rect: egui::Rect, select_tool: bool, session: &Session) {
+    fn paint(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        select_tool: bool,
+        session: &Session,
+        wizard: Option<&Wizard>,
+    ) {
         let painter = painter.with_clip_rect(rect);
         let view = &self.view;
         let origin = rect.min;
@@ -438,7 +482,46 @@ impl CanvasState {
         }
 
         // which tool is active, as a small pill in the corner
-        let mut text = if select_tool {
+        let mut text = if let Some(w) = wizard {
+            match (w.tool, w.pen, w.step()) {
+                (Some(Tool::Crop), ..) => "Crop \u{b7} drag to choose the plot, drag its edges to adjust",
+                (Some(Tool::Exclude), Pen::Brush, _) => "Exclude \u{b7} drag to paint (Alt erases)",
+                (Some(Tool::Exclude), Pen::Rectangle, _) => "Exclude \u{b7} drag a block (Alt erases)",
+                (Some(Tool::Exclude), Pen::Polygon, _) => {
+                    "Exclude \u{b7} click corners, double-click or Enter closes, Esc cancels (Alt erases)"
+                }
+                (None, _, Step::Prepare) => "Drag to move the image, wheel to zoom \u{b7} choose Crop or Exclude to draw",
+                (None, _, Step::Colours) => {
+                    "Colours \u{b7} hover to see where a colour is used, click to select it, right-click to say what it is"
+                }
+                (None, _, Step::PlotArea) => {
+                    "Plot area \u{b7} hover to light a line, click to give it to the selected tick, right-click for a menu"
+                }
+                (None, _, Step::Shapes) => match w.shape_click() {
+                    ShapeClick::Select => {
+                        "Shapes \u{b7} hover to light a shape and its copies, click to select it, right-click to say \
+                         what it is"
+                    }
+                    ShapeClick::Move => {
+                        "Move \u{b7} click a piece to put it in the selected shape or take it out, drag around \
+                         pieces to move them all (Alt: out), middle-drag to pan"
+                    }
+                    ShapeClick::Links => {
+                        "Links \u{b7} click a link to cut the path, click one end then another to join them, Esc to \
+                         let go"
+                    }
+                },
+                (None, _, Step::Curves) if w.edit_points() => {
+                    "Points \u{b7} click a point to take it out, click where one is missing to put it in, click a cross \
+                     to put it back"
+                }
+                (None, _, Step::Curves) => {
+                    "Curves \u{b7} hover to light a piece, click to add it to the selected series or take it out, \
+                     right-click for a menu"
+                }
+            }
+            .to_owned()
+        } else if select_tool {
             "Select tool \u{b7} click a curve, Shift+click adds it to the series".to_owned()
         } else {
             "Hand tool \u{b7} drag to pan, wheel to zoom \u{b7} hold Ctrl to select".to_owned()
@@ -526,7 +609,7 @@ mod frame_cost {
         };
         let t = Instant::now();
         let output = ctx.run_ui(input, |ui| {
-            show(ui, session, state);
+            show(ui, session, state, None);
         });
         let _ = ctx.tessellate(output.shapes, output.pixels_per_point);
         t.elapsed().as_secs_f64() * 1e3
