@@ -8,7 +8,8 @@ in the background, so the window stays usable while a big one loads:
 Hand tool (default): drag pans, the mouse wheel zooms, Ctrl+0 fits the page.
 Select tool (hold Ctrl; Cmd on macOS): the mouse snaps to curve points, a click selects, Ctrl+Shift+click adds a curve to
 the series.
-Right click: record the selected point as x min / x max / y min / y max, then type its plot value in the side panel.
+Right click: record the selected point as x min / x max / y min / y max, then type its plot value in the side panel; or
+hide the selected curve (grid lines, minor ticks) so it is no longer drawn or snapped to.
 Export CSV or Copy numbers write the active series as x,y.
 
 A raster image (PNG, JPEG, GIF, BMP, TIFF, WebP) opens in the tracing wizard: crop and mask, the colours, the four ticks

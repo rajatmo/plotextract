@@ -1,10 +1,11 @@
 //! The figures a paper's TeX files draw, in the order they are drawn: what `\includegraphics` (and `\includesvg`,
-//! `\epsfig`, `\psfig`) name, looked for where `\graphicspath` says.
+//! `\epsfig`, `\psfig`) name, looked for where `\graphicspath` says. The files are read as TeX reads them: from the main
+//! file, each part where `\input`, `\include` or `\subfile` brings it in.
 
 /// A TeX file of the source.
 pub struct Document {
-    /// Its folder in the source, with `/` between names; empty at the top.
-    pub folder: String,
+    /// Its path in the source, with `/` between names.
+    pub path: String,
     pub text: String,
 }
 
@@ -13,51 +14,106 @@ impl Document {
     fn is_main(&self) -> bool {
         self.text.contains("\\documentclass") || self.text.contains("\\documentstyle")
     }
+
+    /// Its folder in the source; empty at the top.
+    fn folder(&self) -> String {
+        normalize(self.path.rsplit_once('/').map_or("", |(f, _)| f))
+    }
 }
 
-/// The files the documents draw, in order (main files first): for each, the paths in the source it may be, with `/`
-/// between names and with or without an extension, as TeX looks for them.
+/// What a file brings in, where: a figure, or another file.
+enum Use {
+    Figure(String),
+    Part(String),
+}
+
+/// The files the documents draw, in the order they are drawn (from each main file, the parts it brings in read in their
+/// places, then any file no main file brings in): for each, the paths in the source it may be, with `/` between names
+/// and with or without an extension, as TeX looks for them.
 pub fn references(documents: &[Document]) -> Vec<Vec<String>> {
-    let mut order: Vec<&Document> = documents.iter().collect();
-    order.sort_by_key(|d| !d.is_main());
-    let texts: Vec<String> = order.iter().map(|d| without_comments(&d.text)).collect();
+    let texts: Vec<String> = documents.iter().map(|d| without_comments(&d.text)).collect();
     let mut folders = vec![String::new()];
     for text in &texts {
         for (_, arg) in arguments(text, "\\graphicspath") {
             folders.extend(groups(&arg).into_iter().map(|g| normalize(&g)));
         }
     }
+    let mut starts: Vec<usize> = (0..documents.len()).collect();
+    starts.sort_by_key(|&k| !documents[k].is_main());
+    let mut read = vec![false; documents.len()];
     let mut out = Vec::new();
-    for (document, text) in order.iter().zip(&texts) {
-        let mut names = Vec::new();
-        for command in ["\\includegraphics", "\\includesvg"] {
-            names.extend(arguments(text, command));
-        }
-        for command in ["\\epsfig", "\\psfig"] {
-            for (at, arg) in arguments(text, command) {
-                let file = arg.split(',').find_map(|kv| {
-                    let (key, value) = kv.split_once('=')?;
-                    matches!(key.trim(), "file" | "figure").then(|| value.trim().to_string())
-                });
-                names.extend(file.map(|f| (at, f)));
-            }
-        }
-        names.sort_by_key(|(at, _)| *at);
-        for (_, name) in names {
-            let name = name.trim().trim_matches('"').trim();
-            let mut places = Vec::new();
-            for base in [String::new(), document.folder.clone()] {
-                for folder in &folders {
-                    let place = normalize(&format!("{base}/{folder}/{name}"));
-                    if !place.is_empty() && !places.contains(&place) {
-                        places.push(place);
-                    }
-                }
-            }
-            out.push(places);
-        }
+    for k in starts {
+        visit(k, documents, &texts, &folders, &mut read, &mut out);
     }
     out
+}
+
+/// Add the figures document `k` draws to `out`, and those of the parts it brings in, in their places; a document is read
+/// once.
+fn visit(
+    k: usize,
+    documents: &[Document],
+    texts: &[String],
+    folders: &[String],
+    read: &mut [bool],
+    out: &mut Vec<Vec<String>>,
+) {
+    if read[k] {
+        return;
+    }
+    read[k] = true;
+    let (document, text) = (&documents[k], &texts[k]);
+    let folder = document.folder();
+    for (_, used) in uses(text) {
+        match used {
+            Use::Figure(name) => {
+                let name = name.trim().trim_matches('"').trim();
+                let mut places = Vec::new();
+                for base in [String::new(), folder.clone()] {
+                    for f in folders {
+                        let place = normalize(&format!("{base}/{f}/{name}"));
+                        if !place.is_empty() && !places.contains(&place) {
+                            places.push(place);
+                        }
+                    }
+                }
+                out.push(places);
+            }
+            Use::Part(name) => {
+                // as TeX looks for it: from the top of the source, then beside this file, with or without `.tex`
+                let name = name.trim();
+                let wanted: Vec<String> = [String::new(), folder.clone()]
+                    .iter()
+                    .flat_map(|base| [normalize(&format!("{base}/{name}")), normalize(&format!("{base}/{name}.tex"))])
+                    .collect();
+                if let Some(part) = documents.iter().position(|d| wanted.contains(&normalize(&d.path))) {
+                    visit(part, documents, texts, folders, read, out);
+                }
+            }
+        }
+    }
+}
+
+/// The figures and parts `text` uses, in the order it uses them.
+fn uses(text: &str) -> Vec<(usize, Use)> {
+    let mut found = Vec::new();
+    for command in ["\\includegraphics", "\\includesvg"] {
+        found.extend(arguments(text, command).into_iter().map(|(at, name)| (at, Use::Figure(name))));
+    }
+    for command in ["\\epsfig", "\\psfig"] {
+        for (at, arg) in arguments(text, command) {
+            let file = arg.split(',').find_map(|kv| {
+                let (key, value) = kv.split_once('=')?;
+                matches!(key.trim(), "file" | "figure").then(|| value.trim().to_string())
+            });
+            found.extend(file.map(|f| (at, Use::Figure(f))));
+        }
+    }
+    for command in ["\\input", "\\include", "\\subfile"] {
+        found.extend(arguments(text, command).into_iter().map(|(at, name)| (at, Use::Part(name))));
+    }
+    found.sort_by_key(|(at, _)| *at);
+    found
 }
 
 /// `text` with every comment (from an unescaped `%` to the end of its line) taken out.
@@ -150,14 +206,34 @@ pub fn normalize(path: &str) -> String {
 mod tests {
     use super::*;
 
-    fn doc(folder: &str, text: &str) -> Document {
-        Document { folder: folder.into(), text: text.into() }
+    fn doc(path: &str, text: &str) -> Document {
+        Document { path: path.into(), text: text.into() }
+    }
+
+    #[test]
+    fn the_parts_a_main_file_brings_in_are_read_in_their_places() {
+        // as a tar may hold them: the parts before the main file, in another order
+        let late = doc("sections/late.tex", r"\includegraphics{c}");
+        let early = doc("sections/early.tex", r"\includegraphics{b}");
+        let unused = doc("notes.tex", r"\includegraphics{z}");
+        let main = doc(
+            "main.tex",
+            r"\documentclass{article}
+            \includegraphics{a}
+            \subfile{sections/early}
+            \include{sections/late.tex}
+            \input{sections/late}
+            \includegraphics{d}",
+        );
+        let refs = references(&[late, unused, early, main]);
+        let first: Vec<&str> = refs.iter().map(|places| places[0].as_str()).collect();
+        assert_eq!(first, ["a", "b", "c", "d", "z"], "a part is read once; a file no main file brings in comes last");
     }
 
     #[test]
     fn the_figures_are_found_in_the_order_they_are_drawn_main_file_first() {
         let main = doc(
-            "",
+            "paper.tex",
             r"\documentclass{article}
             \graphicspath{{figs/}{./img/}}
             \begin{figure}\includegraphics[width=0.5\linewidth, trim={1 2 3 4}]{loss}\end{figure}
@@ -167,7 +243,7 @@ mod tests {
             \includegraphicsx{not-this}
             \input{sections/results}",
         );
-        let part = doc("sections", r"\includesvg{diagram}");
+        let part = doc("sections/results.tex", r"\includesvg{diagram}");
         let refs = references(&[part, main]);
         let first: Vec<&str> = refs.iter().map(|places| places[0].as_str()).collect();
         assert_eq!(first, ["loss", "plots/a.pdf", "old.eps", "diagram"]);

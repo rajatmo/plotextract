@@ -368,7 +368,7 @@ crates/
   arxiv/           an arXiv paper's figures: download, unpack, order
   app/             the application (icon assets in app/assets)
   corpus/          accuracy and stress tests on real plots, and the probe tool
-docs/              architecture, testing, the demo GIF
+docs/              architecture, testing, the demo (GIF and MP4)
 scripts/           dist.ps1, dist.sh and the text shipped with the packages
 .github/           CI and release workflows
 CHANGELOG.md

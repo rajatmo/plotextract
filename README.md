@@ -3,7 +3,9 @@
 Get the numbers out of a plot. Open a figure from a paper (PDF, SVG, EPS or PostScript, or an image) or import it
 straight from arXiv. Tell plotextract what the axes are worth and pick the curves. You get `x,y` in the plot's own units.
 
-![plotextract importing a figure from arXiv, finding the dotted curve among black axes and text, fixing its shapes by hand (cutting a wrong link, moving pieces with a lasso, checking the oddest piece) and tracing it into a series](docs/demo.gif)
+![plotextract, first with a vector figure imported from arXiv: the grid lines and minor ticks hidden, the four ticks snapped to and given their values, a curve picked and exported as CSV. Then with a raster image: its colours named, its dotted curve found among black axes and text, its shapes fixed by hand, and the curve traced into a series](docs/demo.gif)
+
+The same demo at full size: [docs/demo.mp4](docs/demo.mp4) (1480 × 1090, 1 minute).
 
 ## Download
 
@@ -19,12 +21,14 @@ the plot's extent.
 
 1. **Open** the file: *File > Open*, drop it on the window, or run `plotextract plot.pdf`. *Page Up* and *Page Down* move
    between pages. A protected PDF asks for its password.
-2. **Calibrate.** Hold Ctrl and click the end of a tick mark (the pointer snaps to it). Right-click and record it as
+2. **Clear the way** (if you need to). Grid lines and minor ticks can sit right on the points you want. Ctrl+click
+   one, right-click it and choose *Hide*: it is no longer drawn or snapped to.
+3. **Calibrate.** Zoom in on a tick, hold Ctrl and click its end (the pointer snaps to it). Right-click and record it as
    *x min*, *x max*, *y min* or *y max*, then type the value that tick stands for. Two ticks per axis; tick *log* for a
    logarithmic axis.
-3. **Pick.** Ctrl+click a curve to select it; Ctrl+Shift+click adds it to the series, or takes it out. A series can be
-   any number of curves, such as a dashed line drawn in pieces or a set of markers.
-4. **Export.** *Copy numbers* or *Export CSV*.
+4. **Pick.** Hover a curve with Ctrl held to read it in plot units; Ctrl+Shift+click adds it to the series, or takes it
+   out. A series can be any number of curves, such as a dashed line drawn in pieces or a set of markers.
+5. **Export.** *Export CSV* or *Copy numbers*.
 
 ## Images: traced
 

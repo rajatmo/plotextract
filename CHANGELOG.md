@@ -51,11 +51,16 @@ imported straight from arXiv.
   double-click) to open it. The download runs on a thread with a progress line; the pictures are drawn by four threads
   through the new `Workspace::thumbnail`. Only figure files are written, under names that cannot leave the paper's
   folder; a paper submitted as a PDF alone is offered whole. The welcome screen has the same button.
+- **Hide a curve from the right-click menu of a vector figure.** Ctrl+click a curve in the way (grid lines over the data,
+  minor ticks beside the major ones), right-click and *Hide* it: it is no longer drawn, snapped to or picked. Before, a
+  curve was hidden only from its row in the Curves table.
 
 ### Changed
-- **The README is shorter and written for people using the app**, with a new demo GIF of the tracing wizard (a figure
-  imported from arXiv, its dotted curve found among black axes and text, fixed by hand and traced). The crates, the
-  dependencies and their licences moved to `docs/architecture.md`.
+- **The README is shorter and written for people using the app**, with a new demo GIF that shows both kinds of figure: a
+  vector figure from arXiv (the grid and minor ticks hidden, the ticks snapped to and valued, a curve picked and exported)
+  and a raster image (its colours named, its dotted curve found among black axes and text, fixed by hand and traced), and
+  the same demo at full size as an MP4 (`docs/demo.mp4`). The crates, the dependencies and their licences moved to
+  `docs/architecture.md`.
 - **The app is split along its steps, as `docs/plan.md` planned, and the tracing wizard answers faster.** Slow work is
   one enum of jobs (`jobs.rs`) run by one runner, in place of a channel and a thread spawn per kind; the model is split into
   opening, the wizard's jobs and the arXiv window (`model/`); the wizard into a module per step that owns its state, its
@@ -115,6 +120,9 @@ imported straight from arXiv.
   halo.
 
 ### Fixed
+- **Import from arXiv lists a paper's figures in the paper's order when it is split into files.** The files a main file
+  brings in with `\input`, `\include` or `\subfile` are read in their places, as TeX reads them; before, they were read in
+  the order of the archive, so a paper split into sections (arXiv 2501.11723) listed its first four figures last.
 - **The Hough search could lose a horizontal line.** `imageproc` rounds a line's distance in single precision, which at 90
   degrees put the votes of a horizontal line far from the left edge into the bucket of the row above, so a high enough
   vote threshold missed it. Horizontal lines are now found as the vertical lines of the transposed mask.

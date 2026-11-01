@@ -275,10 +275,14 @@ pub fn show(ui: &mut Ui, session: &Session, state: &mut CanvasState, wizard: Opt
         return intents;
     }
 
-    // the right-click menu records the selected point as a calibration tick
-    response.context_menu(|ui| match (session.selection(), session.selected_point()) {
-        (Some(pick), Some(point)) => {
-            let prim = &session.figure.primitives[pick.primitive];
+    // the right-click menu records the selected point as a calibration tick, and hides the selected curve
+    response.context_menu(|ui| {
+        let Some(pick) = session.selection() else {
+            ui.add_enabled(false, egui::Label::new("Select a curve first (Ctrl+click on it)"));
+            return;
+        };
+        let prim = &session.figure.primitives[pick.primitive];
+        if let Some(point) = session.selected_point() {
             let title =
                 format!("Record point {} of {}", pick.vertex.unwrap_or(0) + 1, curve_label(pick.primitive, prim.kind));
             ui.label(egui::RichText::new(title).strong());
@@ -294,9 +298,17 @@ pub fn show(ui: &mut Ui, session: &Session, state: &mut CanvasState, wizard: Opt
                     ui.close();
                 }
             }
+            ui.separator();
+        } else {
+            ui.label(egui::RichText::new(curve_label(pick.primitive, prim.kind)).strong());
+            ui.separator();
         }
-        _ => {
-            ui.add_enabled(false, egui::Label::new("Select a point first (Ctrl+click on a curve)"));
+        // a curve in the way (grid lines over the data, minor ticks beside the major ones) is hidden, and is then
+        // neither drawn nor snapped to
+        let hide = format!("Hide {}", curve_label(pick.primitive, prim.kind));
+        if ui.button(hide).on_hover_text("Hide this curve: it is no longer drawn, snapped to or picked").clicked() {
+            intents.push(Intent::Edit(Edit::SetHidden(pick.primitive, true)));
+            ui.close();
         }
     });
     if response.hovered() || response.dragged() {

@@ -123,8 +123,7 @@ fn archive(
         } else if extension(&name).eq_ignore_ascii_case("tex") && entry.size() <= MAX_TEX {
             let mut text = Vec::new();
             entry.read_to_end(&mut text).map_err(|e| damaged(&e, over))?;
-            let folder = name.rsplit_once('/').map_or("", |(f, _)| f).to_string();
-            documents.push(Document { folder, text: String::from_utf8_lossy(&text).into_owned() });
+            documents.push(Document { path: name.to_string(), text: String::from_utf8_lossy(&text).into_owned() });
         }
     }
     order(&mut figures, &tex::references(&documents));
