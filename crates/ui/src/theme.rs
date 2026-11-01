@@ -180,3 +180,62 @@ pub fn toggle(ui: &mut Ui, on: bool, label: &str, tip: &str) -> bool {
     let size = vec2(ui.available_width(), BUTTON_HEIGHT - 2.0);
     ui.add_sized(size, egui::Button::new(label).selected(on)).on_hover_text(tip).clicked()
 }
+
+/// The sizes of the eye and the bin, in points.
+pub const EYE: f32 = 22.0;
+const BIN: f32 = 18.0;
+
+/// The eye that shows or hides something (a mask, a group, a curve, a layer): open with a pupil when shown, struck
+/// through when hidden.
+pub fn eye(ui: &mut Ui, shown: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(EYE, EYE), Sense::click());
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, CornerRadius::same(4), ui.visuals().widgets.hovered.weak_bg_fill);
+    }
+    let colour = if shown { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() };
+    let stroke = Stroke::new(1.4, colour);
+    let c = rect.center();
+    let (half_width, half_height) = (8.0, 4.5);
+    // the outline of the eye: two arcs that meet at the corners
+    let steps = 12;
+    let arc = |sign: f32| -> Vec<egui::Pos2> {
+        (0..=steps)
+            .map(|k| {
+                let t = k as f32 / steps as f32;
+                let x = c.x - half_width + 2.0 * half_width * t;
+                let y = c.y + sign * half_height * (std::f32::consts::PI * t).sin();
+                egui::pos2(x, y)
+            })
+            .collect()
+    };
+    painter.add(egui::Shape::line(arc(-1.0), stroke));
+    painter.add(egui::Shape::line(arc(1.0), stroke));
+    if shown {
+        painter.circle_filled(c, 2.6, colour);
+    } else {
+        painter.circle_stroke(c, 2.2, stroke);
+        painter.line_segment([c + vec2(-7.0, -6.0), c + vec2(7.0, 6.0)], stroke);
+    }
+    response
+}
+
+/// The bin that deletes something (a mask, a link): a lid over a can with three ribs.
+pub fn bin(ui: &mut Ui) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(BIN, BIN), Sense::click());
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, CornerRadius::same(4), ui.visuals().widgets.hovered.weak_bg_fill);
+    }
+    let colour = if response.hovered() { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() };
+    let stroke = Stroke::new(1.2, colour);
+    let c = rect.center();
+    painter.line_segment([c + vec2(-5.0, -4.0), c + vec2(5.0, -4.0)], stroke);
+    painter.line_segment([c + vec2(-1.5, -5.5), c + vec2(1.5, -5.5)], stroke);
+    let can = [c + vec2(-4.0, -4.0), c + vec2(-3.2, 5.0), c + vec2(3.2, 5.0), c + vec2(4.0, -4.0)];
+    painter.add(egui::Shape::line(can.to_vec(), stroke));
+    for dx in [-1.6, 0.0, 1.6] {
+        painter.line_segment([c + vec2(dx, -2.0), c + vec2(dx, 3.0)], stroke);
+    }
+    response
+}

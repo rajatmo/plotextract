@@ -10,10 +10,10 @@ use std::collections::BTreeMap;
 
 use egui::{Key, Modifiers, RichText, Ui};
 
-use super::masks::eye;
 use super::thumbs::shared_scale;
 use super::{Output, WizardPanel};
 use crate::panel::{FIELD_HEIGHT, GRID_GAP, cell};
+use crate::theme::eye;
 use crate::theme::{self, Btn};
 use crate::wizard_canvas::{LEFTOVER, group_tint};
 use plotextract_model::Intent;

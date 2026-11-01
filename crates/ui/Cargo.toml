@@ -15,7 +15,6 @@ plotextract-usecases.workspace = true
 plotextract-model.workspace = true
 eframe.workspace = true
 egui.workspace = true
-egui_extras.workspace = true
 rfd.workspace = true
 kurbo.workspace = true
 image.workspace = true

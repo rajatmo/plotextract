@@ -1,15 +1,17 @@
 plotextract: pick curves from plots and export them as data in plot units.
 
-Run it with a file (PDF, SVG, EPS or PostScript), or open one from File > Open, or drop it on the window. Files open
-in the background, so the window stays usable while a big one loads:
+Run it with a file (PDF, SVG, EPS, PostScript or an image), or open one from File > Open, or drop it on the window.
+Files open in the background, so the window stays usable while a big one loads:
 
     plotextract plot.pdf
 
+A vector figure (PDF page, SVG, EPS, PostScript) is laid out as an image is: on the left its layers and every curve,
+each with an eye that hides it (a click on a row selects the curve), on the right calibration, series and the selection.
 Hand tool (default): drag pans, the mouse wheel zooms, Ctrl+0 fits the page.
 Select tool (hold Ctrl; Cmd on macOS): the mouse snaps to curve points, a click selects, Ctrl+Shift+click adds a curve to
 the series.
-Right click: record the selected point as x min / x max / y min / y max, then type its plot value in the side panel; or
-hide the selected curve (grid lines, minor ticks) so it is no longer drawn or snapped to.
+Calibrate: choose a row (x min, x max, y min, y max), Ctrl+click its tick, Record, and type its plot value. The right
+click menu records the selected point too, and hides the selected curve (grid lines, minor ticks).
 Export CSV or Copy numbers write the active series as x,y.
 
 A raster image (PNG, JPEG, GIF, BMP, TIFF, WebP) opens in the tracing wizard: crop and mask, the colours (say what each
@@ -20,8 +22,8 @@ link the pieces of a curve in order, as with a pen: click piece after piece (or 
 a link; order the links in the panel, and copy or save the points as CSV in plot values. The masks you make appear on
 the left, the step and its choices on the right.
 
-Opening a PDF lists its pages and the images drawn on them; open a page to pick its paths, or an image to trace it at the
-resolution it is stored at. The images are kept in your cache folder (plotextract\pdf). A password protected PDF asks for
+Opening a PDF lists the images drawn on its pages, then its pages; open an image to trace it at the resolution it is
+stored at, or a page to pick its paths. The images are kept in your cache folder (plotextract\pdf). A password protected PDF asks for
 its password first.
 
 File > Import from arXiv takes a paper's number (2301.01234) or a link to it, downloads its source from arXiv and shows

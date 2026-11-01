@@ -2,8 +2,10 @@
 //! the user did into intents, hands them to the model and performs the effects it returns; the panels and the canvas
 //! read the model and the wizard and never change them but through intents.
 //!
-//! The vector figure has the side [`panel`] and the [`canvas`]; the tracing wizard has the masks and step panels
-//! ([`wizard_panel`]) and a tool for each step on the canvas ([`wizard_canvas`]).
+//! Both kinds of figure have the same layout: what the figure is made of on the left, the [`canvas`] in the middle, what
+//! is done with it on the right. A vector figure's panels are [`panel`] (its layers and curves, then calibration and
+//! series); the tracing wizard's are [`wizard_panel`] (the masks, then the step), with a tool for each step on the canvas
+//! ([`wizard_canvas`]). Opening a PDF goes through [`pdf_window`] first.
 
 mod about;
 mod app;
@@ -28,7 +30,7 @@ use plotextract_model::Model;
 /// What running the window gives back.
 pub type Result = eframe::Result;
 
-/// The smallest window, in points: the fixed-width side panel plus room for the page, and a menu bar and status bar
+/// The smallest window, in points: the two fixed-width panels plus room for the page, and a menu bar and status bar
 /// above and below.
 const MIN_WINDOW: [f32; 2] = [800.0, 560.0];
 

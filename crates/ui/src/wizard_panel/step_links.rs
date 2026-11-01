@@ -4,8 +4,8 @@
 
 use egui::{Key, Modifiers, RichText, Ui};
 
-use super::masks::bin;
 use super::{Output, WizardPanel};
+use crate::theme::bin;
 use crate::theme::{self, Btn};
 use crate::wizard_canvas::{group_tint, link_tint};
 use plotextract_model::Intent;

@@ -19,7 +19,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -77,7 +77,6 @@ tar = "0.4.46"
 winresource = "0.1"
 
 # UI
-egui_extras = { version = "0.37", default-features = false }
 eframe = "0.37"
 egui = "0.37"
 rfd = "0.17"

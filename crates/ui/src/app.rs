@@ -17,9 +17,9 @@ use plotextract_model::jobs::{Answer, Runner};
 use plotextract_model::text::{curve_label, measure};
 use plotextract_model::{Effect, Intent, Level, Model};
 
-/// The side panel's width, in points. It does not resize: the cards inside are laid out for it.
-const SIDE_PANEL_WIDTH: f32 = 340.0;
-/// The widths of the wizard's panels: the masks on the left, the step on the right.
+/// The widths of the panels, in points, the same for a vector figure and an image: what it is made of on the left (its
+/// curves, or the masks), what is done with it on the right (calibration and series, or the step). They do not resize:
+/// the cards inside are laid out for them.
 const MASKS_PANEL_WIDTH: f32 = 290.0;
 const STEP_PANEL_WIDTH: f32 = 320.0;
 
@@ -372,12 +372,27 @@ impl eframe::App for App {
                 // the mask whose row the pointer is on is outlined on the image
                 self.canvas.set_panel_hover(hover);
             }
+            // a vector figure, laid out as the wizard: its layers and curves on the left, what is done with them on the
+            // right
             None => {
-                egui::Panel::right("side")
-                    .resizable(false)
-                    .exact_size(SIDE_PANEL_WIDTH)
-                    .frame(panel_frame)
-                    .show(ui, |ui| intents.extend(panel::show(ui, &self.model, &mut self.panel)));
+                if let Some(session) = self.model.session() {
+                    let mut hover = None;
+                    egui::Panel::left("curves").resizable(false).exact_size(MASKS_PANEL_WIDTH).frame(panel_frame).show(
+                        ui,
+                        |ui| {
+                            let out = panel::curves(ui, session, &mut self.panel);
+                            hover = out.row_hover;
+                            intents.extend(out.intents);
+                        },
+                    );
+                    egui::Panel::right("side")
+                        .resizable(false)
+                        .exact_size(STEP_PANEL_WIDTH)
+                        .frame(panel_frame)
+                        .show(ui, |ui| intents.extend(panel::show(ui, session, &self.model, &mut self.panel)));
+                    // the curve whose row the pointer is on is outlined on the page
+                    self.canvas.set_row_hover(hover);
+                }
             }
         }
         egui::CentralPanel::default().show(ui, |ui| match self.model.session() {

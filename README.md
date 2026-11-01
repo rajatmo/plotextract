@@ -3,7 +3,7 @@
 Get the numbers out of a plot. Open a figure from a paper (PDF, SVG, EPS or PostScript, or an image) or import it
 straight from arXiv. Tell plotextract what the axes are worth and pick the curves. You get `x,y` in the plot's own units.
 
-![plotextract, first with a vector figure imported from arXiv: its PDF listed and its page opened, the grid lines and minor ticks hidden, the four ticks snapped to and given their values, a curve picked and exported as CSV. Then with a raster image, in five steps: the legend painted over, its colours named, the frame's sides made the four ticks, the two parts of the blue curve joined into one group, linked in order and saved as CSV](docs/demo.gif)
+![plotextract, first with a vector figure imported from arXiv: its PDF listed and its page opened, the grid hidden by the eyes of its rows in the list of curves, the four ticks snapped to and given their values, a curve picked and exported as CSV. Then with a raster image, in five steps: the legend painted over, its colours named, the frame's sides made the four ticks, the two parts of the blue curve joined into one group, linked in order and saved as CSV](docs/demo.gif)
 
 The same demo at full size: [docs/demo.mp4](docs/demo.mp4) (1480 × 1090, 1 minute).
 
@@ -33,8 +33,12 @@ PDF, SVG, EPS and PostScript figures keep the paths they were drawn with. plotex
 it exports is a vertex of the original curve. On real matplotlib and Mathematica figures the result is within 0.1% of
 the plot's extent.
 
-1. **Clear the way** (if you need to). Grid lines and minor ticks can sit right on the points you want. Ctrl+click
-   one, right-click it and choose *Hide*: it is no longer drawn or snapped to.
+The window is laid out as for an image. On the left is what the figure is made of: the layers (the picture, the
+strokes, the fills), each with an eye, and every curve, one row each. A row's eye hides its curve, a click selects
+it, and the pointer on a row outlines its curve on the page. On the right is what you do with it:
+
+1. **Clear the way** (if you need to). Grid lines and minor ticks can sit right on the points you want. Hide one with
+   its eye in the list, or Ctrl+click it, right-click it and choose *Hide*: it is no longer drawn or snapped to.
 2. **Calibrate.** Choose a row (*x min*, *x max*, *y min*, *y max*), zoom in on its tick, hold Ctrl and click the tick's
    end (the pointer snaps to it), press *Record*, and type the value the tick stands for. Two ticks per axis; tick *log*
    for a logarithmic axis. The card turns green when both axes are done.

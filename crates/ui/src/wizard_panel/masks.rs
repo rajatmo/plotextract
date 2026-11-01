@@ -6,8 +6,8 @@
 use std::collections::BTreeSet;
 
 use super::{Output, WizardPanel};
-use crate::panel::{FIELD_HEIGHT, cell};
-use crate::theme::{self, ACCENT};
+use crate::panel::cell;
+use crate::theme::{self, ACCENT, bin, eye};
 use crate::wizard_canvas::{group_tint, tick_tint, tint_of};
 use egui::{Color32, CornerRadius, RichText, Sense, Stroke, Ui, vec2};
 use plotextract_domain::MaskMeta;
@@ -208,26 +208,6 @@ fn row(
     }
 }
 
-/// The bin that deletes a mask: a lid over a can with three ribs.
-pub(super) fn bin(ui: &mut Ui) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(DELETE, FIELD_HEIGHT.min(DELETE)), Sense::click());
-    let painter = ui.painter();
-    if response.hovered() {
-        painter.rect_filled(rect, CornerRadius::same(4), ui.visuals().widgets.hovered.weak_bg_fill);
-    }
-    let colour = if response.hovered() { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() };
-    let stroke = Stroke::new(1.2, colour);
-    let c = rect.center();
-    painter.line_segment([c + vec2(-5.0, -4.0), c + vec2(5.0, -4.0)], stroke);
-    painter.line_segment([c + vec2(-1.5, -5.5), c + vec2(1.5, -5.5)], stroke);
-    let can = [c + vec2(-4.0, -4.0), c + vec2(-3.2, 5.0), c + vec2(3.2, 5.0), c + vec2(4.0, -4.0)];
-    painter.add(egui::Shape::line(can.to_vec(), stroke));
-    for dx in [-1.6, 0.0, 1.6] {
-        painter.line_segment([c + vec2(dx, -2.0), c + vec2(dx, 3.0)], stroke);
-    }
-    response
-}
-
 /// A mask's ID, its tags and its properties, under its name.
 fn details(ui: &mut Ui, meta: &MaskMeta) {
     let indent = EYE + SWATCH + 2.0 * GAP;
@@ -268,40 +248,6 @@ fn chip(ui: &mut Ui, text: &str) {
         .corner_radius(CornerRadius::same(8))
         .inner_margin(egui::Margin::symmetric(6, 1))
         .show(ui, |ui| ui.label(RichText::new(text).small()));
-}
-
-/// The eye that shows or hides a mask: open with a pupil when shown, struck through when hidden.
-pub(super) fn eye(ui: &mut Ui, shown: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(EYE, FIELD_HEIGHT.min(EYE)), Sense::click());
-    let painter = ui.painter();
-    if response.hovered() {
-        painter.rect_filled(rect, CornerRadius::same(4), ui.visuals().widgets.hovered.weak_bg_fill);
-    }
-    let colour = if shown { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() };
-    let stroke = Stroke::new(1.4, colour);
-    let c = rect.center();
-    let (half_width, half_height) = (8.0, 4.5);
-    // the outline of the eye: two arcs that meet at the corners
-    let steps = 12;
-    let arc = |sign: f32| -> Vec<egui::Pos2> {
-        (0..=steps)
-            .map(|k| {
-                let t = k as f32 / steps as f32;
-                let x = c.x - half_width + 2.0 * half_width * t;
-                let y = c.y + sign * half_height * (std::f32::consts::PI * t).sin();
-                egui::pos2(x, y)
-            })
-            .collect()
-    };
-    painter.add(egui::Shape::line(arc(-1.0), stroke));
-    painter.add(egui::Shape::line(arc(1.0), stroke));
-    if shown {
-        painter.circle_filled(c, 2.6, colour);
-    } else {
-        painter.circle_stroke(c, 2.2, stroke);
-        painter.line_segment([c + vec2(-7.0, -6.0), c + vec2(7.0, 6.0)], stroke);
-    }
-    response
 }
 
 /// A picture of a mask, in the colours it is drawn with on the image.

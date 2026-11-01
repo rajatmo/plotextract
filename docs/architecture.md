@@ -271,8 +271,16 @@ unpacked file like any other, so a project made from it finds it again in the ca
   becomes a `PasswordPrompt` the shell shows as a window, and the typed password starts a new job. Project loading reads
   the (small) project file at once and starts a job only if its figure is not the open one, or if it brings back a
   tracing.
-- **`CanvasState`** (view, hover, pictures, worker) and **`PanelState`** (value cells, table scroll) are the widgets'
-  own memory. `canvas::show` and `panel::show` read the model and return `Vec<Intent>`.
+- **`CanvasState`** (view, hover, pictures, worker) and **`PanelState`** (value cells, list scroll) are the widgets'
+  own memory. `canvas::show` and the panels read the model and return `Vec<Intent>`.
+- **One layout for both kinds of figure.** A vector figure has the wizard's two panels at the same widths: on the left
+  what it is made of (`panel::curves`: the layers, and every curve a row, as the wizard lists its masks), on the right
+  what is done with it (`panel::show`: calibration, series, selection, as the wizard shows its step). A curve's row has
+  the masks' columns: an eye that hides it, a picture of its kind (ringed green in the active series), its name and its
+  points. The list draws only the rows in view (`ScrollArea::show_rows`), since a figure can have a million curves. A
+  click on a row selects the curve, a curve selected on the page scrolls its row into view, and the row under the
+  pointer outlines its curve on the page (`CanvasState::set_row_hover`, as `set_panel_hover` does for a mask). The eye
+  and the bin are one widget each (`theme::eye`, `theme::bin`) for every panel.
 - **The modules** follow the steps. The model crate is `lib.rs` (intents, effects, dispatch) with `opening.rs` (load
   jobs, documents listed, passwords, projects), `tracing.rs` (the wizard's jobs), `pdf_import.rs` (the parts of a
   document, their pictures and the one chosen), `arxiv_import.rs`, `jobs.rs` and `text.rs`. The
@@ -378,7 +386,7 @@ flowchart TD
 | `plotextract-ports` | ports | `Importer`, `PictureSource`, `PaperSource` (with `Paper`, `Progress`, `ArxivError`), `Files` |
 | `plotextract-usecases` | use cases | the vector `Session`, the library of files (`Workspace`, `Registry`), the tracing wizard (a module per step) |
 | `plotextract-model` | model | `Model` (intents, effects, jobs run on threads by the shell), the wording of every message |
-| `plotextract-ui` | window | the egui shell, canvas, side panels, the wizard's panels and a canvas tool per step, the arXiv and About windows, theme, worker-thread rendering |
+| `plotextract-ui` | window | the egui shell, canvas, the panels of a vector figure, the wizard's panels and a canvas tool per step, the import (PDF, arXiv) and About windows, theme, worker-thread rendering |
 | `plotextract` | composition root | builds the adapters and the model, runs the window |
 | `plotextract-import` | adapter support | what the vector importers share: path flattening with the PyMuPDF-compatible rules, the primitive builder with its limits, picture size limits |
 | `plotextract-pdf`, `-svg`, `-ps` | adapters | the vector formats (hayro, usvg and resvg, stet) |

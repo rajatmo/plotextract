@@ -1238,20 +1238,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_extras"
-version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "def286cf47194f3fe45b8e37c503ada7a20a64b59a903b4bc704baec943b1827"
-dependencies = [
- "ahash",
- "egui",
- "enum-map",
- "itertools 0.15.0",
- "log",
- "profiling",
-]
-
-[[package]]
 name = "egui_glow"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1300,26 +1286,6 @@ name = "endi"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
-
-[[package]]
-name = "enum-map"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4532960034c15ba2f55e9eee631040ecc473c32e6c4b200828c759840f13a06"
-dependencies = [
- "enum-map-derive",
-]
-
-[[package]]
-name = "enum-map-derive"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7127272f64b3e098f7d81f350d672081b879bff896d219c42370dc858b1af9ff"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.9",
-]
 
 [[package]]
 name = "enumflags2"
@@ -3512,7 +3478,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "plotextract"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "clap",
  "plotextract-arxiv",
@@ -3530,7 +3496,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-algo"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "image",
  "imageproc",
@@ -3544,7 +3510,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-arxiv"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "flate2",
  "plotextract-domain",
@@ -3556,7 +3522,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-corpus"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "image",
  "kurbo",
@@ -3578,7 +3544,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-domain"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "kurbo",
  "serde",
@@ -3588,14 +3554,14 @@ dependencies = [
 
 [[package]]
 name = "plotextract-fs"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "plotextract-ports",
 ]
 
 [[package]]
 name = "plotextract-image"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "image",
  "kurbo",
@@ -3608,7 +3574,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-import"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "kurbo",
  "plotextract-domain",
@@ -3616,7 +3582,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-model"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "flate2",
  "image",
@@ -3637,7 +3603,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-pdf"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "hayro",
  "hayro-interpret",
@@ -3652,7 +3618,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-ports"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "kurbo",
  "plotextract-domain",
@@ -3661,7 +3627,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-ps"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "kurbo",
  "plotextract-domain",
@@ -3673,7 +3639,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-svg"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "kurbo",
  "plotextract-domain",
@@ -3685,11 +3651,10 @@ dependencies = [
 
 [[package]]
 name = "plotextract-ui"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "eframe",
  "egui",
- "egui_extras",
  "image",
  "kurbo",
  "plotextract-algo",
@@ -3709,7 +3674,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-usecases"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "image",
  "kurbo",

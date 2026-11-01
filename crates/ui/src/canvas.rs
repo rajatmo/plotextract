@@ -147,6 +147,8 @@ pub struct CanvasState {
     /// The wizard's half-finished gestures and the mask picture.
     wizard: WizardCanvas,
     hover: Option<Hit>,
+    /// The curve whose row in the curves panel the pointer is on: outlined as if hovered.
+    row_hover: Option<usize>,
     base: Option<Picture>,
     detail: Option<Detail>,
     pending: Option<Pending>,
@@ -163,6 +165,7 @@ impl Default for CanvasState {
             view: View::default(),
             wizard: WizardCanvas::default(),
             hover: None,
+            row_hover: None,
             base: None,
             detail: None,
             pending: None,
@@ -194,6 +197,11 @@ impl CanvasState {
     /// A colour's row in the wizard's panel is under the pointer: light that colour on the image.
     pub fn set_panel_hover(&mut self, mask: Option<MaskId>) {
         self.wizard.set_panel_hover(mask);
+    }
+
+    /// A curve's row in the curves panel is under the pointer: outline that curve on the page.
+    pub fn set_row_hover(&mut self, curve: Option<usize>) {
+        self.row_hover = curve;
     }
 
     /// The vertex under the pointer, while the select tool is held.
@@ -415,7 +423,7 @@ impl CanvasState {
 
         let members: &[usize] = session.active_series().map_or(&[], |a| &session.series()[a].members);
         let selected = session.selection().map(|p| p.primitive);
-        let hovered = self.hover.map(|h| h.primitive);
+        let hovered = self.hover.map(|h| h.primitive).or(self.row_hover.filter(|&i| session.is_visible(i)));
 
         let clip = rect.expand(3.0);
         let draw = |i: usize, stroke_width: f32, color: Option<Color32>| {
