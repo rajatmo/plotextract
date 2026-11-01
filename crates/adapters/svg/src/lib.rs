@@ -107,7 +107,6 @@ impl Importer for SvgImporter {
             unit: Unit::Pixel,
             primitives,
             page: 0,
-            page_count: 1,
             truncated,
         })
     }

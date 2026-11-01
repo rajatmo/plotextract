@@ -11,9 +11,11 @@ mod arxiv_window;
 #[cfg(test)]
 mod bench;
 mod canvas;
+mod cards;
 mod cursor;
 mod detail;
 mod panel;
+mod pdf_window;
 mod theme;
 mod view;
 mod wizard_canvas;

@@ -75,6 +75,55 @@ impl Scratch {
         std::fs::write(&path, out).unwrap();
         path
     }
+
+    /// A PDF of 2 pages of 100 x 100 points: page 1 draws a line, page 2 a 32 x 16 picture, red on the left half and blue
+    /// on the right.
+    fn pdf_with_image(&self) -> PathBuf {
+        let mut pixels = Vec::new();
+        for _ in 0..16 {
+            for x in 0..32 {
+                pixels.extend(if x < 16 { [255, 0, 0] } else { [0, 0, 255] });
+            }
+        }
+        let stream = |dict: &str, data: &[u8]| {
+            let mut out = format!("<< {dict} /Length {} >>\nstream\n", data.len()).into_bytes();
+            out.extend_from_slice(data);
+            out.extend_from_slice(b"\nendstream");
+            out
+        };
+        let objects: Vec<Vec<u8>> = vec![
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 5 0 R >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << /XObject << /P 7 0 R >> >> /Contents 6 0 R >>"
+                .to_vec(),
+            stream("", b"10 10 m 90 90 l S"),
+            stream("", b"q 64 0 0 32 10 10 cm /P Do Q"),
+            stream(
+                "/Type /XObject /Subtype /Image /Width 32 /Height 16 /ColorSpace /DeviceRGB /BitsPerComponent 8",
+                &pixels,
+            ),
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (n, body) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend(format!("{} 0 obj\n", n + 1).into_bytes());
+            out.extend(body);
+            out.extend(b"\nendobj\n");
+        }
+        let xref = out.len();
+        out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).into_bytes());
+        for o in offsets {
+            out.extend(format!("{o:010} 00000 n \n").into_bytes());
+        }
+        out.extend(
+            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).into_bytes(),
+        );
+        let path = self.0.join("paper.pdf");
+        std::fs::write(&path, out).unwrap();
+        path
+    }
 }
 
 impl Drop for Scratch {
@@ -129,7 +178,7 @@ fn only_the_newest_open_counts() {
     let fx = m.run_jobs(first);
     assert!(fx.is_empty() && m.session().is_none(), "the older answer is ignored");
     m.run_jobs(second);
-    assert_eq!(m.session().unwrap().figure.unit, plotextract_domain::Unit::Point);
+    assert!(m.pdf().is_some_and(|p| p.document().unwrap().name == "book.pdf"), "the newer is listed");
 }
 
 #[test]
@@ -247,46 +296,42 @@ fn requests_that_need_a_dialog_become_effects() {
 }
 
 #[test]
-fn pages_are_opened_on_demand_and_work_on_them_is_kept() {
+fn opening_a_pdf_lists_its_pages_and_opens_the_one_chosen() {
     let dir = Scratch::new("pages");
     let mut m = model();
-    run(&mut m, Intent::Open(dir.pdf(3)));
-    assert_eq!(m.session().unwrap().figure.page_count, 3);
-    assert_eq!(message(&m), "Opened book.pdf, page 1 of 3: 1 curves. Ctrl+click a curve to select it.");
+    let fx = run(&mut m, Intent::Open(dir.pdf(3)));
+    assert!(m.session().is_none(), "nothing is opened before a page is chosen");
+    assert!(matches!(fx.as_slice(), [Effect::RunBatch(jobs)] if jobs.len() == 3), "a picture of each page: {fx:?}");
+    let document = m.pdf().expect("the window is open").document().unwrap();
+    assert_eq!((document.name.as_str(), document.contents.pages), ("book.pdf", 3));
+    assert_eq!(message(&m), "Choose a page or an image of book.pdf to open.");
 
-    // work on page 1, move on, work on page 3
-    m.dispatch(Intent::Edit(Edit::SetValue(Slot::XMin, Some(11.0))));
-    let fx = run(&mut m, Intent::GoToPage(2));
-    assert!(matches!(&fx[0], Effect::Opened { .. }));
-    assert_eq!(m.session().unwrap().figure.page, 2);
-    assert_eq!(m.session().unwrap().calibration().value(Slot::XMin), None, "a new page starts clean");
-    m.dispatch(Intent::Edit(Edit::SetValue(Slot::XMin, Some(33.0))));
-
-    // coming back finds the work, without reading the file again
-    let fx = m.dispatch(Intent::GoToPage(0));
-    assert!(matches!(&fx[0], Effect::Opened { .. }), "restored at once: {fx:?}");
-    assert_eq!(m.session().unwrap().calibration().value(Slot::XMin), Some(11.0));
-    let fx = m.dispatch(Intent::GoToPage(2));
-    assert!(matches!(&fx[0], Effect::Opened { .. }));
-    assert_eq!(m.session().unwrap().calibration().value(Slot::XMin), Some(33.0));
-
-    // a page nobody touched is not remembered
-    run(&mut m, Intent::GoToPage(1));
-    assert!(m.dispatch(Intent::GoToPage(1)).is_empty(), "already there");
-    assert!(matches!(m.dispatch(Intent::GoToPage(3)).as_slice(), []));
-    assert_eq!(m.message().unwrap().level, Level::Error);
+    let fx = run(&mut m, Intent::ImportPart(Part::Page(2)));
+    assert!(matches!(&fx[0], Effect::Opened { title, .. } if title == "book.pdf \u{2013} plotextract"));
+    assert!(m.pdf().is_none(), "the window closes");
+    let f = &m.session().unwrap().figure;
+    assert_eq!(f.page, 2);
+    assert_eq!(message(&m), "Opened book.pdf, page 3: 1 curves. Ctrl+click a curve to select it.");
 }
 
 #[test]
-fn opening_another_file_forgets_the_pages_of_the_old_one() {
-    let dir = Scratch::new("forget");
-    let mut m = model();
+fn closing_the_list_of_a_pdf_keeps_what_was_open() {
+    let dir = Scratch::new("pdf-cancel");
+    let mut m = opened(&dir);
     run(&mut m, Intent::Open(dir.pdf(2)));
-    m.dispatch(Intent::Edit(Edit::SetValue(Slot::XMin, Some(1.0))));
-    run(&mut m, Intent::GoToPage(1));
-    assert!(m.parked.contains_key(&0));
-    run(&mut m, Intent::Open(dir.svg()));
-    assert!(m.parked.is_empty());
+    assert!(m.pdf().is_some());
+    run(&mut m, Intent::ClosePdf);
+    assert!(m.pdf().is_none());
+    assert_eq!(m.session().unwrap().source.as_deref(), Some(dir.svg().display().to_string().as_str()));
+}
+
+#[test]
+fn a_figure_from_arxiv_that_is_a_pdf_is_listed_too() {
+    let dir = Scratch::new("arxiv-pdf");
+    let mut m = model();
+    m.dispatch(Intent::RequestArxiv);
+    run(&mut m, Intent::ImportFigure(dir.pdf(2)));
+    assert!(m.arxiv().is_none() && m.pdf().is_some_and(|p| p.document().unwrap().contents.pages == 2));
 }
 
 #[test]
@@ -294,13 +339,15 @@ fn a_project_names_its_page() {
     let dir = Scratch::new("projectpage");
     let mut m = model();
     run(&mut m, Intent::Open(dir.pdf(3)));
-    run(&mut m, Intent::GoToPage(2));
+    run(&mut m, Intent::ImportPart(Part::Page(2)));
     m.dispatch(Intent::Edit(Edit::SetValue(Slot::YMin, Some(5.0))));
     let saved = dir.0.join("p.plotextract.json");
     m.dispatch(Intent::SaveProject(saved.clone()));
 
+    // the project names its page: nothing is chosen
     let mut fresh = model();
     run(&mut fresh, Intent::LoadProject(saved));
+    assert!(fresh.pdf().is_none());
     assert_eq!(fresh.session().unwrap().figure.page, 2);
     assert_eq!(fresh.session().unwrap().calibration().value(Slot::YMin), Some(5.0));
 }
@@ -648,6 +695,79 @@ fn a_project_whose_tracing_cannot_be_read_opens_the_image_afresh_with_a_warning(
     run(&mut m, Intent::LoadProject(saved));
     assert_eq!(m.wizard().expect("the image is open").step(), Step::Prepare);
     assert_eq!(m.message().unwrap().level, Level::Warning, "{}", message(&m));
+}
+
+/// A model that keeps the images it takes out of documents in `dir`'s cache folder.
+fn caching(dir: &Scratch) -> Model {
+    let papers = ArxivPapers::new(Arc::new(FakeArxiv(None)), dir.0.join("papers"));
+    Model::new(library().with_cache(dir.0.join("cache")), Arc::new(papers))
+}
+
+/// Run the jobs of a batch among `effects`, and give back their answers.
+fn run_batch(effects: Vec<Effect>) -> Vec<Answer> {
+    effects
+        .into_iter()
+        .flat_map(|e| match e {
+            Effect::RunBatch(jobs) => jobs,
+            other => panic!("not a batch: {other:?}"),
+        })
+        .map(Job::run)
+        .collect()
+}
+
+#[test]
+fn a_pdf_lists_its_pages_and_images_with_their_pictures_and_an_image_opens_to_be_traced() {
+    use plotextract_usecases::wizard::Step;
+    let dir = Scratch::new("pdf-import");
+    let mut m = caching(&dir);
+
+    // opening it is the load job, whose answer lists the parts and asks for their pictures, a batch
+    let fx = m.dispatch(Intent::Open(dir.pdf_with_image()));
+    assert!(matches!(fx.as_slice(), [Effect::Run(Job::Load(_))]), "{fx:?}");
+    assert_eq!(m.loading(), Some("paper.pdf"));
+    let pictures = m.run_jobs(fx);
+    let pdf = m.pdf().expect("the window is open");
+    let document = pdf.document().expect("read");
+    assert_eq!(document.contents.pages, 2);
+    let image = *document.contents.images.first().expect("the picture on page 2");
+    assert_eq!((image.page, image.index, image.width, image.height), (1, 0, 32, 16));
+
+    let answers = run_batch(pictures);
+    assert_eq!(answers.len(), 3, "both pages and the image");
+    for answer in answers {
+        let Answer::PartPicture(p) = answer else { panic!("a picture") };
+        assert_eq!(Some(p.id), m.pdf().unwrap().document_job());
+        let picture = p.picture.unwrap_or_else(|e| panic!("{:?}: {e}", p.part));
+        assert_eq!(picture.width.max(picture.height), super::arxiv_import::THUMBNAIL_SIDE, "{:?}", p.part);
+    }
+
+    // the image is taken out into the cache and opened, to trace
+    run(&mut m, Intent::ImportPart(Part::Image(image)));
+    assert!(m.pdf().is_none(), "the window closes");
+    let w = m.wizard().expect("an image to trace");
+    assert_eq!((w.size(), w.step()), ((32, 16), Step::Prepare));
+    let source = PathBuf::from(m.session().unwrap().source.clone().unwrap());
+    assert!(source.starts_with(dir.0.join("cache").join("pdf")), "{}", source.display());
+    assert!(source.file_name().unwrap().to_string_lossy().ends_with("-page2-image1.png"));
+    assert!(message(&m).contains("32 x 16"), "{}", message(&m));
+
+    // a page opens as any page, its paths to pick
+    run(&mut m, Intent::Open(dir.pdf_with_image()));
+    run(&mut m, Intent::ImportPart(Part::Page(0)));
+    assert!(m.wizard().is_none());
+    let figure = &m.session().unwrap().figure;
+    assert_eq!((figure.page, figure.primitives.len()), (0, 1));
+}
+
+#[test]
+fn a_damaged_pdf_is_refused_without_a_list() {
+    let dir = Scratch::new("pdf-import-bad");
+    let mut m = caching(&dir);
+    let bad = dir.0.join("notes.pdf");
+    std::fs::write(&bad, "%PDF-1.7 not really").unwrap();
+    run(&mut m, Intent::Open(bad));
+    assert!(m.pdf().is_none() && m.session().is_none());
+    assert_eq!(m.message().unwrap().level, Level::Error, "{}", message(&m));
 }
 
 /// Serves one source for every paper, as arXiv would with the version `v2`; or nothing.

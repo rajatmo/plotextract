@@ -41,6 +41,12 @@ order by hand; and figures are imported straight from arXiv.
   groups and the links, and the step shown. *Load project* opens the image afresh and brings it all back on that step:
   the colours, lines and pieces are found again and the changes and links made again on them. A project from before
   loads as it did.
+- **Every PDF opened is listed first: a page or an image of it is chosen.** Opening a PDF (*File > Open*, a drop, the
+  command line, a figure from arXiv) lists every raster image the pages draw (each once, the tiny ones left out), then
+  every page, each with a picture, read and drawn on threads, in folding sections of the Import from PDF window. A
+  protected PDF asks for its password first, and what it lists opens without asking again. A page opens with its paths
+  to pick. An image is taken out at the resolution it is stored at (laid on white where it is transparent), kept in the
+  cache folder and opened to trace. A project names its page and opens it directly.
 - **File > Import from arXiv.** Type a paper's number or paste a link to it: its source is downloaded from arXiv
   (`plotextract-arxiv`, with ureq over rustls, flate2 and tar), the figures in it are unpacked into the user's cache
   folder and shown as pictures, the ones the TeX files draw first in the order they draw them. Choose one and Import (or
@@ -52,6 +58,9 @@ order by hand; and figures are imported straight from arXiv.
   curve was hidden only from its row in the Curves table.
 
 ### Changed
+- **No more moving between the pages of an open file.** The page is chosen when a PDF is opened, so the Page control,
+  Page Up / Page Down, View > Previous page / Next page and the pages kept with their work are gone, and `Figure` no
+  longer has `page_count` (`Importer::contents` lists the pages). A PostScript program opens at its first page.
 - **The README is shorter and written for people using the app**, with a new demo GIF that shows both kinds of figure: a
   vector figure from arXiv (the grid and minor ticks hidden, the ticks snapped to and valued, a curve picked and exported)
   and a raster image (its colours named, its dotted curve found among black axes and text, fixed by hand and traced), and

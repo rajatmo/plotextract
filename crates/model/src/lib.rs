@@ -6,9 +6,9 @@
 //!
 //! Opening a file can take a while (a big or hostile file may take seconds), so it never runs inside `dispatch`: the
 //! model hands the shell a [`LoadJob`] to run on a thread and takes the answer back with [`Model::finish_load`]. The
-//! window stays responsive, and an answer that arrives after the user asked for something else is ignored.
+//! window stays responsive, and an answer that arrives after the user asked for something else is ignored. A document (a
+//! PDF) is not opened at once: the job lists its pages and the images they draw, and the one chosen is opened.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -22,14 +22,15 @@ use plotextract_usecases::{Opened, Session, SessionError, Source, Workspace, Wor
 mod arxiv_import;
 pub mod jobs;
 mod opening;
+mod pdf_import;
 #[cfg(test)]
 mod tests;
 pub mod text;
 mod tracing;
 
 pub use self::arxiv_import::{ArxivFetched, ArxivImport, ArxivJob, Thumbnail, ThumbnailJob};
-use self::opening::What;
 pub use self::opening::{LoadJob, Loaded, PasswordPrompt};
+pub use self::pdf_import::{Document, Part, PartPicture, PartPictureJob, PdfImport};
 pub use self::tracing::{Analysed, AnalysisJob, LineJob, LinesFound, PieceJob, PiecesFound};
 use crate::jobs::{Answer, Job};
 
@@ -46,8 +47,6 @@ pub enum Intent {
     SaveProject(PathBuf),
     WriteCsv(PathBuf),
     CopyNumbers,
-    /// Show another page of the open file, counting from 0.
-    GoToPage(usize),
     /// The password the user typed for the file that asked for one.
     SubmitPassword(String),
     CancelPassword,
@@ -58,6 +57,9 @@ pub enum Intent {
     /// Open one of the paper's figures, and close the window.
     ImportFigure(PathBuf),
     CloseArxiv,
+    /// Open a page or an image of the document listed, and close the window.
+    ImportPart(Part),
+    ClosePdf,
     // the document
     Edit(Edit),
     Undo,
@@ -93,9 +95,9 @@ pub enum Effect {
     CopyText(String),
     /// Run a job on another thread and give its answer to [`Model::finish`].
     Run(Job),
-    /// Run jobs on a few threads that take them in turn (the pictures of a paper's figures, for the window to show).
+    /// Run jobs on a few threads that take them in turn (the pictures of what an import window lists).
     RunBatch(Vec<Job>),
-    /// A different figure (or page) is now shown: reset what is tied to the old one. `source` draws its pictures,
+    /// A different figure is now shown: reset what is tied to the old one. `source` draws its pictures,
     /// unless the file is too large to draw.
     Opened {
         title: String,
@@ -126,10 +128,8 @@ pub struct Message {
 pub struct Model {
     workspace: Arc<Workspace>,
     session: Option<Session>,
-    /// What the open figure was read from, for other pages of the same file.
+    /// What the open figure was read from: its pixels, for the wizard to look at.
     source: Option<Source>,
-    /// The sessions of the other pages of the open file that the user worked on, so coming back finds the work.
-    parked: BTreeMap<usize, (Session, Source)>,
     slot: Slot,
     message: Option<Message>,
     /// Set while an image is being prepared for tracing.
@@ -139,6 +139,7 @@ pub struct Model {
     loading: Option<(u64, String)>,
     password: Option<PasswordPrompt>,
     arxiv: ArxivImport,
+    pdf: PdfImport,
     /// Where papers come from.
     papers: Arc<dyn PaperSource>,
 }
@@ -151,7 +152,6 @@ impl Model {
             workspace: Arc::new(workspace),
             session: None,
             source: None,
-            parked: BTreeMap::new(),
             slot: Slot::XMin,
             message: None,
             wizard: None,
@@ -159,6 +159,7 @@ impl Model {
             loading: None,
             password: None,
             arxiv: ArxivImport::default(),
+            pdf: PdfImport::default(),
             papers,
         }
     }
@@ -222,7 +223,7 @@ impl Model {
             Answer::Lines(found) => self.finish_lines(found),
             Answer::Pieces(found) => self.finish_pieces(*found),
             Answer::Arxiv(fetched) => self.finish_arxiv(*fetched),
-            Answer::Thumbnail(_) => Vec::new(),
+            Answer::Thumbnail(_) | Answer::PartPicture(_) => Vec::new(),
         }
     }
 
@@ -259,9 +260,7 @@ impl Model {
                     fx.push(Effect::AskCsvPath { suggested: format!("{}.csv", self.active_name()) });
                 }
             }
-            Intent::Open(path) => {
-                self.start(What::File { path, options: OpenOptions::default() }, None, fx);
-            }
+            Intent::Open(path) => self.open(path, fx),
             Intent::LoadProject(path) => self.load_project(&path, fx),
             Intent::SaveProject(path) => {
                 if let Some(s) = &self.session {
@@ -284,20 +283,24 @@ impl Model {
                     self.info("Copied the series as x,y text.");
                 }
             }
-            Intent::GoToPage(page) => self.go_to_page(page, fx),
             Intent::SubmitPassword(password) => {
                 if let Some(prompt) = self.password.take() {
                     self.start(prompt.retry.with_password(password), prompt.project, fx);
                 }
             }
             Intent::CancelPassword => self.password = None,
-            Intent::RequestArxiv => self.arxiv.open = true,
+            Intent::RequestArxiv => {
+                self.pdf.open = false;
+                self.arxiv.open = true;
+            }
             Intent::FetchArxiv(text) => self.fetch_arxiv(&text, fx),
             Intent::ImportFigure(path) => {
                 self.arxiv.open = false;
-                self.start(What::File { path, options: OpenOptions::default() }, None, fx);
+                self.open(path, fx);
             }
             Intent::CloseArxiv => self.arxiv.open = false,
+            Intent::ImportPart(part) => self.import_part(part, fx),
+            Intent::ClosePdf => self.pdf.open = false,
             Intent::Edit(edit) => {
                 let clears = matches!(edit, Edit::ClearCalibration);
                 if self.with_session(|s| s.edit(edit)) && clears {

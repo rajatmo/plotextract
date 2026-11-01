@@ -33,7 +33,10 @@ fn registry() -> Registry {
 fn main() -> plotextract_ui::Result {
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).init();
     let args = Args::parse();
-    let workspace = Workspace::new(registry(), Arc::new(plotextract_fs::LocalFiles));
-    let papers = Arc::new(ArxivPapers::new(Arc::new(Arxiv), cache_dir()));
+    // the images taken out of documents are kept beside the papers' figures, in the user's cache folder
+    let cache = cache_dir();
+    let workspace = Workspace::new(registry(), Arc::new(plotextract_fs::LocalFiles))
+        .with_cache(cache.parent().map_or_else(|| cache.clone(), PathBuf::from));
+    let papers = Arc::new(ArxivPapers::new(Arc::new(Arxiv), cache));
     plotextract_ui::run(Model::new(workspace, papers), args.file)
 }

@@ -36,9 +36,8 @@ pub struct Figure {
     pub height: f64,
     pub unit: Unit,
     pub primitives: Vec<Primitive>,
-    /// Which page of the file this is (from 0) and how many it has.
+    /// Which page of the file this is, from 0.
     pub page: usize,
-    pub page_count: usize,
     /// The file holds more paths than were kept: the importer stopped at its limits.
     pub truncated: bool,
 }

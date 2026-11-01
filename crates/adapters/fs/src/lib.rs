@@ -12,7 +12,11 @@ impl Files for LocalFiles {
         std::fs::read(path)
     }
 
+    /// Write the file, making the folder it goes in if there is none.
     fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        if let Some(folder) = path.parent().filter(|f| !f.as_os_str().is_empty()) {
+            std::fs::create_dir_all(folder)?;
+        }
         std::fs::write(path, bytes)
     }
 }

@@ -1,33 +1,43 @@
-//! Opening a figure: the load job (run on a thread), its answer, a password asked for, other pages of the same file,
-//! and a project brought back with its figure.
+//! Opening a figure: the load job (run on a thread), its answer, a password asked for, and a project brought back with
+//! its figure. A document (a PDF) is not opened at once: the load job lists its pages and the images they draw, and one
+//! of them is chosen in the Import from PDF window ([`super::pdf_import`]).
+
+use plotextract_ports::{Contents, Embedded};
 
 use super::*;
 
 /// What a load reads.
 #[derive(Clone)]
 pub(super) enum What {
-    /// A file on disk.
-    File { path: PathBuf, options: OpenOptions },
-    /// A file already read, at another page or with a password.
-    Source { source: Source, name: Option<String> },
+    /// A file on disk. A document is listed, to choose a page or an image of it, unless `choose` is false (a project
+    /// names its page).
+    File { path: PathBuf, options: OpenOptions, choose: bool },
+    /// A page of a document read already (from `path`), at its page.
+    Page { source: Source, path: PathBuf },
+    /// An image a document read already (from `path`) draws, taken out of it.
+    Image { source: Source, path: PathBuf, image: Embedded },
 }
 
 impl What {
     pub(super) fn name(&self) -> String {
         match self {
             What::File { path, .. } => file_name(path),
-            What::Source { name, .. } => name.as_deref().map(|n| file_name(Path::new(n))).unwrap_or_default(),
+            What::Page { source, path } => format!("{}, page {}", file_name(path), source.page() + 1),
+            What::Image { path, image, .. } => {
+                format!("{}, image {} of page {}", file_name(path), image.index + 1, image.page + 1)
+            }
         }
     }
 
     pub(super) fn with_password(&self, password: String) -> What {
         match self {
-            What::File { path, options } => {
-                What::File { path: path.clone(), options: OpenOptions { password: Some(password), ..options.clone() } }
-            }
-            What::Source { source, name } => {
-                What::Source { source: source.with_password(password), name: name.clone() }
-            }
+            What::File { path, options, choose } => What::File {
+                path: path.clone(),
+                options: OpenOptions { password: Some(password), ..options.clone() },
+                choose: *choose,
+            },
+            // a document read already was read with its password
+            What::Page { .. } | What::Image { .. } => self.clone(),
         }
     }
 }
@@ -51,12 +61,28 @@ impl std::fmt::Debug for LoadJob {
     }
 }
 
+/// What a load gives: a figure opened, or a document's pages and images to choose from.
+pub(super) enum Outcome {
+    Opened(Box<Opened>),
+    Listed { source: Source, contents: Contents },
+}
+
 impl LoadJob {
-    /// The slow part: read and interpret the file. Safe to call on any thread.
+    /// The slow part: read and interpret the file, or go through the pages of a document. Safe to call on any thread.
     pub fn run(self) -> Loaded {
+        let named = |path: &Path| Some(path.display().to_string());
+        let opened = |o: Opened| Outcome::Opened(Box::new(o));
         let result = match &self.what {
-            What::File { path, options } => self.workspace.open(path, options.clone()),
-            What::Source { source, name } => self.workspace.load(source.clone(), name.clone()),
+            What::File { path, options, choose } => self.workspace.read(path, options.clone()).and_then(|source| {
+                if *choose && source.is_document() {
+                    let contents = source.contents()?;
+                    Ok(Outcome::Listed { source, contents })
+                } else {
+                    self.workspace.load(source, named(path)).map(opened)
+                }
+            }),
+            What::Page { source, path } => self.workspace.load(source.clone(), named(path)).map(opened),
+            What::Image { source, path, image } => self.workspace.open_image_of(source, path, image).map(opened),
         };
         Loaded { id: self.id, what: self.what, project: self.project, result }
     }
@@ -67,7 +93,7 @@ pub struct Loaded {
     pub(super) id: u64,
     pub(super) what: What,
     pub(super) project: Option<Project>,
-    pub(super) result: Result<Opened, WorkspaceError>,
+    pub(super) result: Result<Outcome, WorkspaceError>,
 }
 
 /// A file that needs a password before it can be opened.
@@ -88,22 +114,26 @@ impl Model {
             return fx;
         }
         self.loading = None;
-        let Loaded { what, project, result, .. } = loaded;
+        let Loaded { id, what, project, result } = loaded;
         match result {
-            Ok(opened) => {
+            Ok(Outcome::Opened(opened)) => {
                 self.password = None;
-                let wanted = project.as_ref().map(|p| p.page);
-                self.install(opened, &mut fx);
+                self.install(*opened, &mut fx);
                 if let (Some(mut project), Some(s)) = (project, &mut self.session) {
                     let tracing = project.tracing.take();
                     s.load_project(project);
                     fx.push(Effect::ValuesChanged);
-                    debug_assert!(wanted.is_none_or(|p| p == s.figure.page));
                     self.announce();
                     self.restore_tracing(tracing, &mut fx);
                     return fx;
                 }
                 self.announce();
+            }
+            Ok(Outcome::Listed { source, contents }) => {
+                self.password = None;
+                if let What::File { path, .. } = what {
+                    self.list_document(id, path, source, contents, &mut fx);
+                }
             }
             Err(WorkspaceError::Import(e @ (ImportError::PasswordRequired | ImportError::WrongPassword))) => {
                 let wrong = e == ImportError::WrongPassword;
@@ -124,28 +154,20 @@ impl Model {
         fx.push(Effect::Run(Job::Load(Box::new(LoadJob { id, workspace: self.workspace.clone(), what, project }))));
     }
 
-    /// Make an opened figure the one shown. What was open before is kept only if it is another page of the same file
-    /// and the user worked on it.
+    /// Open the file at `path`: a figure at once, a document to choose from.
+    pub(super) fn open(&mut self, path: PathBuf, fx: &mut Vec<Effect>) {
+        self.start(What::File { path, options: OpenOptions::default(), choose: true }, None, fx);
+    }
+
+    /// Make an opened figure the one shown, in place of what was open.
     pub(super) fn install(&mut self, opened: Opened, fx: &mut Vec<Effect>) {
-        let same_file =
-            self.source.is_some() && self.session.as_ref().map(|s| &s.source) == Some(&opened.session.source);
-        if let (true, Some(old), Some(source)) = (same_file, self.session.take(), self.source.take()) {
-            if old.has_work() {
-                self.parked.insert(old.figure.page, (old, source));
-            }
-        } else {
-            self.parked.clear();
-        }
         self.source = Some(opened.source().clone());
         let pictures = opened.picture_source();
         self.wizard = opened.needs_tracing().then(|| {
             let f = &opened.session.figure;
             Wizard::new(f.width as u32, f.height as u32)
         });
-        self.show(opened.session, pictures, fx);
-    }
-
-    pub(super) fn show(&mut self, session: Session, pictures: Option<Source>, fx: &mut Vec<Effect>) {
+        let session = opened.session;
         let name = session.source.as_deref().map(|s| file_name(Path::new(s))).unwrap_or_default();
         self.session = Some(session);
         self.slot = Slot::XMin;
@@ -162,7 +184,11 @@ impl Model {
             self.message = Some(Message { text, level: Level::Info });
             return;
         }
-        let place = if f.page_count > 1 { format!("{name}, page {} of {}", f.page + 1, f.page_count) } else { name };
+        let place = if self.source.as_ref().is_some_and(Source::is_document) {
+            format!("{name}, page {}", f.page + 1)
+        } else {
+            name
+        };
         let hint = "Ctrl+click a curve to select it.";
         if f.truncated {
             let n = f.primitives.len();
@@ -175,33 +201,6 @@ impl Model {
         } else {
             self.info(format!("Opened {place}: {} curves. {hint}", f.primitives.len()));
         }
-    }
-
-    pub(super) fn go_to_page(&mut self, page: usize, fx: &mut Vec<Effect>) {
-        let (Some(session), Some(source)) = (&self.session, &self.source) else { return };
-        let count = session.figure.page_count;
-        if page >= count {
-            return self.error(text::workspace_error(&ImportError::NoSuchPage { page, count }.into()));
-        }
-        if page == session.figure.page {
-            return;
-        }
-        if let Some((parked, parked_source)) = self.parked.remove(&page) {
-            // back to a page that has work on it
-            let pictures = (!parked.figure.truncated).then(|| parked_source.clone());
-            if let (Some(old), Some(old_source)) = (self.session.take(), self.source.take())
-                && old.has_work()
-            {
-                self.parked.insert(old.figure.page, (old, old_source));
-            }
-            self.source = Some(parked_source);
-            self.show(parked, pictures, fx);
-            self.announce();
-            return;
-        }
-        let name = session.source.clone();
-        let what = What::Source { source: source.with_page(page), name };
-        self.start(what, None, fx);
     }
 
     pub(super) fn load_project(&mut self, path: &Path, fx: &mut Vec<Effect>) {
@@ -217,8 +216,9 @@ impl Model {
             Some(source)
                 if reopen || open_source.as_deref() != Some(source.as_str()) || open_page != Some(project.page) =>
             {
+                // the project names its page: nothing is chosen
                 let options = OpenOptions { page: project.page, ..Default::default() };
-                self.start(What::File { path: PathBuf::from(source), options }, Some(project), fx);
+                self.start(What::File { path: PathBuf::from(source), options, choose: false }, Some(project), fx);
                 self.info(format!("Loading {}", path.display()));
             }
             _ => match &mut self.session {

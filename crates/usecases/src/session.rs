@@ -83,11 +83,6 @@ impl Session {
         self.edit(Edit::RecordPoint(slot, point))
     }
 
-    /// Whether the user has changed anything: an edit that can be undone, or one that was undone.
-    pub fn has_work(&self) -> bool {
-        self.history.can_undo() || self.history.can_redo()
-    }
-
     pub fn can_undo(&self) -> bool {
         self.history.can_undo()
     }
@@ -213,7 +208,6 @@ mod tests {
             height: 100.0,
             unit: Unit::Point,
             page: 0,
-            page_count: 1,
             truncated: false,
             primitives: vec![
                 line(PrimitiveKind::Stroke, 0, &[(10.0, 90.0), (60.0, 40.0), (90.0, 10.0)]),

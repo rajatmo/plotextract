@@ -63,14 +63,14 @@ fn release_only(name: &str) -> bool {
 #[test]
 fn a_good_pdf_opens() {
     let Some(o) = opened("good.pdf") else { return };
-    assert_eq!(o.session.figure.page_count, 1);
+    assert_eq!(o.source().contents().unwrap().pages, 1);
     assert!(!o.session.figure.truncated);
 }
 
 #[test]
-fn every_page_of_a_long_document_is_reachable() {
+fn every_page_of_a_long_document_is_listed_and_reachable() {
     let Some(o) = opened("pages_120.pdf") else { return };
-    assert_eq!(o.session.figure.page_count, 120);
+    assert_eq!(o.source().contents().unwrap().pages, 120);
     let (last, _) = open("pages_120.pdf", OpenOptions { page: 119, ..Default::default() }).unwrap();
     assert_eq!(last.unwrap().session.figure.page, 119);
     let (past, _) = open("pages_120.pdf", OpenOptions { page: 120, ..Default::default() }).unwrap();
@@ -83,8 +83,12 @@ fn thousands_of_blank_pages_open_at_once() {
         return;
     };
     let o = result.unwrap();
-    assert_eq!((o.session.figure.page, o.session.figure.page_count), (4999, 5000));
+    assert_eq!(o.session.figure.page, 4999);
     assert!(took < Duration::from_secs(10), "took {took:?}");
+    // and they are listed, to choose from, as quickly
+    let start = std::time::Instant::now();
+    assert_eq!(o.source().contents().unwrap().pages, 5000);
+    assert!(start.elapsed() < Duration::from_secs(10), "listing took {:?}", start.elapsed());
 }
 
 #[test]

@@ -100,7 +100,6 @@ impl Importer for PsImporter {
             unit: Unit::Point,
             primitives: builder.finish(),
             page: options.page,
-            page_count,
             truncated,
         })
     }

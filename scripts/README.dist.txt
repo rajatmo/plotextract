@@ -20,11 +20,12 @@ link the pieces of a curve in order, as with a pen: click piece after piece (or 
 a link; order the links in the panel, and copy or save the points as CSV in plot values. The masks you make appear on
 the left, the step and its choices on the right.
 
+Opening a PDF lists its pages and the images drawn on them; open a page to pick its paths, or an image to trace it at the
+resolution it is stored at. The images are kept in your cache folder (plotextract\pdf). A password protected PDF asks for
+its password first.
+
 File > Import from arXiv takes a paper's number (2301.01234) or a link to it, downloads its source from arXiv and shows
 every figure in it; choose one and Import to open it. The figures are kept in your cache folder (plotextract\arxiv).
-
-A document with several pages opens at page 1. Move between pages with the Page control at the top of the side panel or
-with Page Up / Page Down; work on a page is kept while you look at others. A password protected PDF asks for its password.
 
 Ctrl+Z / Ctrl+Shift+Z undo and redo, Ctrl+S saves the project (calibration, series, hidden curves and page; for an image,
 everything done in the wizard, brought back on the same step when the project is opened), F1 shows the About window.

@@ -37,8 +37,8 @@ Inside, the patterns are few and named:
 ## Domain (`plotextract-domain`)
 
 - **`Figure`**: one page of a file. Width and height in the file's own `Unit` (points for PDF and PostScript, CSS pixels
-  for SVG), origin top left, y down; its `Primitive`s; which `page` it is of how many (`page_count`); and `truncated`
-  when the importer stopped at its limits.
+  for SVG), origin top left, y down; its `Primitive`s; which `page` of the file it is; and `truncated` when the importer
+  stopped at its limits.
 - **`Primitive`**: one stroked or filled path as vertices plus the places where it breaks into pieces. Strokes come
   first, each kind numbered from 0. Importers apply the same flattening rules (PyMuPDF compatible: a rectangle `re` and a
   quad differ in corner order), so the numbers are reproducible.
@@ -208,6 +208,29 @@ Format specifics:
 A `PictureSource` is created on the thread that uses it (hayro's and stet's renderers are not `Send`) by
 `Importer::picture`, from the same bytes and options as the figure.
 
+**What a document holds.** A format whose files are documents (`Importer::is_document`: PDF) is not opened at once: a
+page of it, or an image a page draws, is chosen first. `Importer::contents` lists a file's pages and the raster images
+they draw (`Embedded`: the page, its place among that page's images, its size); `Importer::image` gives one of them as
+the bytes of a PNG file. The defaults are one page and no images. The PDF importer implements them with a second
+`Device` (`ImageFinder`) run over
+each page. It counts the distinct raster images a page draws (by hayro's cache key, so one drawn twice counts once,
+and those under 16 pixels a side are left out). It decodes the one asked for (`RasterImage::with_rgba`), lays it on
+white where it is transparent and writes it as PNG with `image`. An image drawn on several pages is listed once, on
+the first. `Source::contents` lists a file read, and `Workspace::image_of` makes a `Source` of one image.
+`Workspace::open_image_of` writes that image into the cache folder (`<cache>/pdf/<document>-<hash>-page<p>-image<i>.png`,
+the hash of the document's bytes, so two documents of one name do not share it) and opens it, so a project made from it
+finds it again. The composition root puts the cache beside the arXiv papers'.
+
+In the shell, the load job of a file opened (`What::File` with `choose`) reads it, and for a document answers with its
+contents (`Outcome::Listed`) instead of a figure. A password is asked for first, as for any file. `Model::list_document`
+keeps the `Document`, with the `Source` it was read into, and asks for an `Effect::RunBatch` of a `Job::PartPicture`
+per page and per image (a page drawn small, or an image taken out and drawn small). `Intent::ImportPart` opens a page
+(`What::Page`, the source at that page) or an image (`What::Image`) in another load job, without reading the file again.
+A project names its page, so its load does not choose (`choose: false`). The window (`pdf_window.rs`) shows the images,
+then the pages (an image is the plot itself, a page the plot with what surrounds it), each in a section that folds
+away, on the same cards as the arXiv window (`cards.rs`); every PDF opened goes through it, a figure from
+arXiv as well. There is no moving between pages once one is open: another page is chosen by opening the file again.
+
 ## arXiv (`plotextract-arxiv`, behind `PaperSource`)
 
 `ArxivId::parse` reads a paper's number however it is written (with or without `arXiv:` or a version, old style, or a
@@ -238,23 +261,21 @@ unpacked file like any other, so a project made from it finds it again in the ca
                                               background threads
 ```
 
-- `Model` owns the `Session` (and the `Source`, the sessions of other pages that have work on them, the status message,
-  the password prompt). It has no egui in it, so the tests drive it with intents. `text.rs` is the one place that turns
+- `Model` owns the `Session` (and the `Source`, the status message, the password prompt, the import windows' state). It has no egui in it, so the tests drive it with intents. `text.rs` is the one place that turns
   facts (errors, units, calibration status) into sentences.
 - **Slow work is a job.** `Intent::Open` makes a `Job::Load`; `dispatch` returns it as `Effect::Run`. The kinds of job
   are one enum (`jobs.rs`: open a file, look at the colours, search for lines, for pieces and shapes, download a paper,
   draw a figure small); the shell runs every one the same way, with one `Runner`: a thread per job (a few workers for a
-  batch) and one channel for the answers, which go to `Model::finish` (a figure's picture to the arXiv window). Jobs are
+  batch) and one channel for the answers, which go to `Model::finish` (a picture to the import window that asked for it). Jobs are
   numbered; the answer to any job but the newest is dropped, so quickly opening two files shows the second. A password error does not fail: it
   becomes a `PasswordPrompt` the shell shows as a window, and the typed password starts a new job. Project loading reads
   the (small) project file at once and starts a job only if its figure is not the open one, or if it brings back a
   tracing.
-- **Pages.** `Intent::GoToPage` reopens the same `Source` at another page without touching the file. A page the user
-  worked on (`Session::has_work`) is parked and comes back instantly; opening a different file forgets the parked pages.
 - **`CanvasState`** (view, hover, pictures, worker) and **`PanelState`** (value cells, table scroll) are the widgets'
   own memory. `canvas::show` and `panel::show` read the model and return `Vec<Intent>`.
 - **The modules** follow the steps. The model crate is `lib.rs` (intents, effects, dispatch) with `opening.rs` (load
-  jobs, pages, passwords, projects), `tracing.rs` (the wizard's jobs), `arxiv_import.rs`, `jobs.rs` and `text.rs`. The
+  jobs, documents listed, passwords, projects), `tracing.rs` (the wizard's jobs), `pdf_import.rs` (the parts of a
+  document, their pictures and the one chosen), `arxiv_import.rs`, `jobs.rs` and `text.rs`. The
   wizard (`plotextract_usecases::wizard`) is a module per step (`prepare`, `colour_step`, `plot_area`, `shape_step`,
   `link_step`), each owning its fields, its changes and its masks' metadata; `step.rs` is the `WizardStep` trait;
   `work.rs` is the work saved with a project; `mod.rs`

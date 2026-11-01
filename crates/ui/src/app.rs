@@ -10,6 +10,7 @@ use plotextract_domain::format_g;
 use crate::arxiv_window::ArxivWindow;
 use crate::canvas::{self, CanvasState};
 use crate::panel::{self, PanelState};
+use crate::pdf_window::PdfWindow;
 use crate::wizard_panel::WizardPanel;
 use crate::{about, theme};
 use plotextract_model::jobs::{Answer, Runner};
@@ -34,6 +35,7 @@ pub struct App {
     /// The slow work the model asked for, running on other threads.
     jobs: Runner,
     arxiv_window: ArxivWindow,
+    pdf_window: PdfWindow,
     /// What is typed in the password prompt.
     password: String,
 }
@@ -56,6 +58,7 @@ impl App {
             deferred: Vec::new(),
             jobs: Runner::default(),
             arxiv_window: ArxivWindow::default(),
+            pdf_window: PdfWindow::default(),
             password: String::new(),
         };
         if let Some(path) = path {
@@ -74,14 +77,21 @@ impl App {
         }
     }
 
-    /// Give the answers of the jobs that finished to the model (a figure's picture to the arXiv window), and do what they
-    /// ask for next.
+    /// Give the answers of the jobs that finished to the model (a picture to the import window that asked for it), and do
+    /// what they ask for next.
     fn receive_answers(&mut self, ctx: &Context) {
         for answer in self.jobs.answers() {
-            if let Answer::Thumbnail(thumbnail) = answer {
-                self.arxiv_window.receive(ctx, thumbnail);
-                continue;
-            }
+            let answer = match answer {
+                Answer::Thumbnail(thumbnail) => {
+                    self.arxiv_window.receive(ctx, thumbnail);
+                    continue;
+                }
+                Answer::PartPicture(picture) => {
+                    self.pdf_window.receive(ctx, picture);
+                    continue;
+                }
+                other => other,
+            };
             let mut queue = VecDeque::new();
             for effect in self.model.finish(answer) {
                 self.perform(ctx, effect, &mut queue);
@@ -165,20 +175,11 @@ impl App {
         } else if take(Modifiers::COMMAND, Key::Z) {
             intents.push(Intent::Undo);
         }
-        if let Some(f) = self.model.session().map(|s| &s.figure) {
-            if take(Modifiers::NONE, Key::PageDown) && f.page + 1 < f.page_count {
-                intents.push(Intent::GoToPage(f.page + 1));
-            }
-            if take(Modifiers::NONE, Key::PageUp) && f.page > 0 {
-                intents.push(Intent::GoToPage(f.page - 1));
-            }
-        }
     }
 
     fn menu(&self, ui: &mut Ui, intents: &mut Vec<Intent>) {
         let session = self.model.session();
         let has_figure = session.is_some();
-        let (page, pages) = session.map_or((0, 1), |s| (s.figure.page, s.figure.page_count));
         let mut item = |ui: &mut Ui, enabled: bool, text: &str, shortcut: &str, intent: Intent| {
             let button = egui::Button::new(text).shortcut_text(shortcut);
             if ui.add_enabled(enabled, button).clicked() {
@@ -203,9 +204,6 @@ impl App {
             });
             ui.menu_button("View", |ui| {
                 item(ui, has_figure, "Fit page", "Ctrl+0", Intent::FitView);
-                ui.separator();
-                item(ui, page > 0, "Previous page", "Page Up", Intent::GoToPage(page.saturating_sub(1)));
-                item(ui, page + 1 < pages, "Next page", "Page Down", Intent::GoToPage(page + 1));
             });
             ui.menu_button("Help", |ui| {
                 item(ui, true, "About plotextract", "F1", Intent::ToggleAbout);
@@ -388,6 +386,7 @@ impl eframe::App for App {
         });
         about::window(&ctx, &mut self.show_about, self.icon.id());
         self.arxiv_window.show(&ctx, self.model.arxiv(), &mut intents);
+        self.pdf_window.show(&ctx, self.model.pdf(), &mut intents);
         self.password_prompt(&ctx, &mut intents);
 
         if !intents.is_empty() {

@@ -40,13 +40,12 @@ fn run(path: &std::path::Path, page: usize) -> Result<(), String> {
         (f.primitives.len(), f.primitives.iter().map(|p| p.points.len()).sum::<usize>())
     };
     println!(
-        "open {:>8.0} ms  {:>7} primitives  {:>9} points{}  page {} of {}  {:.0} x {:.0} {}",
+        "open {:>8.0} ms  {:>7} primitives  {:>9} points{}  page {}  {:.0} x {:.0} {}",
         t.elapsed().as_secs_f64() * 1e3,
         n,
         points,
         if opened.session.figure.truncated { " (cut short)" } else { "" },
         opened.session.figure.page + 1,
-        opened.session.figure.page_count,
         opened.session.figure.width,
         opened.session.figure.height,
         opened.session.figure.unit.symbol()

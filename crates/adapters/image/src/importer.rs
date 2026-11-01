@@ -46,7 +46,6 @@ impl Importer for RasterImporter {
             unit: Unit::Pixel,
             primitives: Vec::new(),
             page: 0,
-            page_count: 1,
             truncated: false,
         })
     }

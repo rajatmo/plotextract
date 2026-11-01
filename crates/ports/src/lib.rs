@@ -17,6 +17,26 @@ pub trait PictureSource {
     fn render(&mut self, region: kurbo::Rect, scale: f64) -> Result<Bitmap, ImportError>;
 }
 
+/// A raster image one of a file's pages draws, by its page and its place among the images of that page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Embedded {
+    /// The page that draws it, from 0.
+    pub page: usize,
+    /// Which of the page's images it is, from 0, in the order the page draws them (each once).
+    pub index: usize,
+    /// Its size in pixels, as stored.
+    pub width: u32,
+    pub height: u32,
+}
+
+/// What there is to work on in a file: its pages and the raster images they draw.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Contents {
+    pub pages: usize,
+    /// Each image once, on the first page that draws it, in page order.
+    pub images: Vec<Embedded>,
+}
+
 /// A file format: recognizes its files and turns them into a [`Figure`].
 pub trait Importer: Send + Sync {
     fn name(&self) -> &'static str;
@@ -38,6 +58,22 @@ pub trait Importer: Send + Sync {
     /// cannot move between threads). `None` when the format has no picture to draw.
     fn picture(&self, _bytes: &Arc<Vec<u8>>, _options: &OpenOptions) -> Option<Box<dyn PictureSource>> {
         None
+    }
+
+    /// Whether a file of the format is a document: what to open of it (a page, or an image a page draws) is chosen from
+    /// its [`Importer::contents`] first.
+    fn is_document(&self) -> bool {
+        false
+    }
+
+    /// The pages of the file and the raster images they draw. A format with no images inside has one page and none.
+    fn contents(&self, _bytes: &Arc<Vec<u8>>, _options: &OpenOptions) -> Result<Contents, ImportError> {
+        Ok(Contents { pages: 1, images: Vec::new() })
+    }
+
+    /// One of the images [`Importer::contents`] lists, as the bytes of a PNG file.
+    fn image(&self, _bytes: &Arc<Vec<u8>>, _options: &OpenOptions, _image: &Embedded) -> Result<Vec<u8>, ImportError> {
+        Err(ImportError::message("the file holds no images"))
     }
 }
 

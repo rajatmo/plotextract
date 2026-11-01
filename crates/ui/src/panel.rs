@@ -66,7 +66,6 @@ pub fn show(ui: &mut Ui, model: &Model, state: &mut PanelState) -> Vec<Intent> {
     };
     let mut intents = Vec::new();
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        page_row(ui, session, &mut intents);
         layers_row(ui, session, &mut intents);
         ui.add_space(4.0);
         let cal = session.calibration();
@@ -80,37 +79,6 @@ pub fn show(ui: &mut Ui, model: &Model, state: &mut PanelState) -> Vec<Intent> {
         theme::card(ui, "Selection", |ui| selection_section(ui, session));
     });
     intents
-}
-
-/// For a file with several pages: which one is shown, and a way to move.
-fn page_row(ui: &mut Ui, session: &Session, intents: &mut Vec<Intent>) {
-    let (page, count) = (session.figure.page, session.figure.page_count);
-    if count < 2 {
-        return;
-    }
-    ui.horizontal(|ui| {
-        let step = |ui: &mut Ui, label: &str, enabled: bool, tip: &str| {
-            ui.add_enabled(enabled, egui::Button::new(label).min_size(vec2(FIELD_HEIGHT, FIELD_HEIGHT)))
-                .on_hover_text(tip)
-                .clicked()
-        };
-        if step(ui, "\u{25c0}", page > 0, "Previous page (Page Up)") {
-            intents.push(Intent::GoToPage(page - 1));
-        }
-        ui.label("Page");
-        let mut shown = page + 1;
-        let field = egui::DragValue::new(&mut shown).range(1..=count).speed(0.1);
-        if ui.add(field).on_hover_text("Type or drag to go to a page").changed() && shown != page + 1 {
-            intents.push(Intent::GoToPage(shown - 1));
-        }
-        ui.label(RichText::new(format!("of {count}")).weak());
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if step(ui, "\u{25b6}", page + 1 < count, "Next page (Page Down)") {
-                intents.push(Intent::GoToPage(page + 1));
-            }
-        });
-    });
-    ui.add_space(4.0);
 }
 
 fn layers_row(ui: &mut Ui, session: &Session, intents: &mut Vec<Intent>) {
@@ -427,15 +395,8 @@ mod tests {
 
     fn session() -> Session {
         let line = Primitive::new(PrimitiveKind::Stroke, 0, vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)], vec![]);
-        let figure = Figure {
-            width: 10.0,
-            height: 10.0,
-            unit: Unit::Point,
-            primitives: vec![line],
-            page: 0,
-            page_count: 1,
-            truncated: false,
-        };
+        let figure =
+            Figure { width: 10.0, height: 10.0, unit: Unit::Point, primitives: vec![line], page: 0, truncated: false };
         Session::new(figure, None)
     }
 

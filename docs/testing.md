@@ -139,6 +139,31 @@ before the colours were looked at waits for them. The model's tests save a proje
 in a fresh window and over the same image: it comes back on its step, with the jobs run. A project whose tracing cannot
 be read opens the image afresh with a warning.
 
+### Pages and images of a PDF
+
+The PDF importer's tests make a two-page PDF in memory. The images are listed once each, on the first page that draws
+them, without the small ones. An image comes out as a PNG of its own pixels, with white where it is transparent, and an
+image that is not there is refused. The model's tests open a PDF with a page of paths and a page with a picture. They
+check that the load job lists both pages and the image, opens nothing yet, and asks for three pictures as a batch. The
+image opens to be traced from the cache folder, and a page opens with its paths and is named in the status bar. Closing
+the list keeps what was open, a PDF figure from arXiv is listed too, a project opens its page without a list, and a
+damaged PDF is refused with no list.
+
+`crates/corpus/tests/pdf_parts.rs` runs the same on the files of `testdata/stress`. `make_stress.py` makes a PDF of a
+vector page and a page with two raster plots (one stored losslessly, one as JPEG). It also makes that PDF protected with
+AES-256 and RC4 (password `secret`) and only against changes, and damaged four ways (an image stream garbled, the file
+cut inside an image, the end cut off, 400 bytes flipped). The tests check these things:
+
+- **Protected:** listing asks for the password and reports a wrong one. With the password, the images decrypt to the
+  same pixels as the plain file's, and every page draws and opens. A file protected only against changes lists without
+  a password.
+- **Damaged:** each of the four, and the fifteen other damaged and crafted PDFs, is refused with a reason or listed as
+  far as it can be. Every part listed is drawn small and opened, or refused with a reason, in well under 20 seconds,
+  with no panic.
+- **The app's flow:** the model asks for the password, asks again after a wrong one, lists the parts with their four
+  pictures, and opens an image and a page without asking again. A damaged file is listed or refused with an error,
+  and the load always ends.
+
 ### Tracing real figures (`crates/corpus/examples/real_eval.rs`)
 
 `cargo run --release -p plotextract-corpus --example real_eval -- figure.pdf ...` draws each vector figure so its longer

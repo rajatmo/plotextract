@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use plotextract_domain::{Bitmap, ImportError, OpenOptions, Project};
-use plotextract_ports::{Files, Importer, PictureSource};
+use plotextract_ports::{Contents, Embedded, Files, Importer, PictureSource};
 
 use crate::registry::Registry;
 use crate::session::{Session, SessionError};
@@ -82,6 +82,16 @@ impl Source {
     pub fn picture(&self) -> Option<Box<dyn PictureSource>> {
         self.importer.picture(&self.bytes, &self.options)
     }
+
+    /// Whether the file is a document: a page of it, or an image a page draws, is chosen before anything is opened.
+    pub fn is_document(&self) -> bool {
+        self.importer.is_document()
+    }
+
+    /// The pages of the file and the raster images they draw.
+    pub fn contents(&self) -> Result<Contents, ImportError> {
+        self.importer.contents(&self.bytes, &self.options)
+    }
 }
 
 /// A figure that was opened: the session, and the source to draw pictures of it from.
@@ -110,11 +120,20 @@ impl Opened {
 pub struct Workspace {
     registry: Registry,
     files: Arc<dyn Files>,
+    /// Where the files the workspace makes are kept (the images taken out of a document), so a project made from one
+    /// finds it again.
+    cache: PathBuf,
 }
 
 impl Workspace {
+    /// A workspace that keeps the files it makes in the system's temporary folder; see [`Workspace::with_cache`].
     pub fn new(registry: Registry, files: Arc<dyn Files>) -> Self {
-        Self { registry, files }
+        Self { registry, files, cache: std::env::temp_dir().join("plotextract") }
+    }
+
+    /// Keep the files the workspace makes in `dir`.
+    pub fn with_cache(self, dir: PathBuf) -> Self {
+        Self { cache: dir, ..self }
     }
 
     pub fn registry(&self) -> &Registry {
@@ -148,11 +167,45 @@ impl Workspace {
 
     /// A small picture of the first page of a figure file, `side` pixels on its longer side.
     pub fn thumbnail(&self, path: &Path, side: u32) -> Result<Bitmap, WorkspaceError> {
-        let opened = self.open(path, OpenOptions::default())?;
+        self.thumbnail_of(self.read(path, OpenOptions::default())?, side)
+    }
+
+    /// A small picture of the page a source is read at, `side` pixels on its longer side.
+    pub fn thumbnail_of(&self, source: Source, side: u32) -> Result<Bitmap, WorkspaceError> {
+        let opened = self.load(source, None)?;
         let f = &opened.session.figure;
         let mut picture = opened.source.picture().ok_or_else(|| ImportError::message("the file draws no picture"))?;
         let scale = f64::from(side) / f.width.max(f.height);
         Ok(picture.render(kurbo::Rect::new(0.0, 0.0, f.width, f.height), scale)?)
+    }
+
+    /// One of the images a document draws, as a source of its own (a PNG file in memory).
+    pub fn image_of(&self, document: &Source, image: &Embedded) -> Result<Source, WorkspaceError> {
+        let png = document.importer.image(&document.bytes, &document.options, image)?;
+        let importer = self
+            .registry
+            .detect(&png, Some("png"))
+            .ok_or_else(|| ImportError::message("no format reads PNG images"))?;
+        Ok(Source { importer, bytes: Arc::new(png), options: OpenOptions::default() })
+    }
+
+    /// Take one of the images a document (read from `path`) draws out of it, into the cache folder, and open it. The file
+    /// is named after the document (and what is in it, so two documents of one name do not share it), the page and the
+    /// image.
+    pub fn open_image_of(&self, document: &Source, path: &Path, image: &Embedded) -> Result<Opened, WorkspaceError> {
+        let source = self.image_of(document, image)?;
+        let stem = path.file_stem().map_or("document".into(), |s| s.to_string_lossy());
+        let mut hash = std::hash::DefaultHasher::new();
+        std::hash::Hash::hash(document.bytes.as_slice(), &mut hash);
+        let name = format!(
+            "{stem}-{:08x}-page{}-image{}.png",
+            std::hash::Hasher::finish(&hash) as u32,
+            image.page + 1,
+            image.index + 1
+        );
+        let out = self.cache.join("pdf").join(name);
+        self.files.write(&out, &source.bytes).map_err(|source| WorkspaceError::Write { path: out.clone(), source })?;
+        self.load(source, Some(out.display().to_string()))
     }
 
     /// A good file name for the project of a session.
@@ -283,7 +336,8 @@ mod tests {
         assert_eq!(opened.source().format_name(), "SVG");
         assert_eq!(opened.session.figure.primitives.len(), 1);
         assert_eq!(opened.session.figure.unit.symbol(), "px");
-        assert_eq!((opened.session.figure.page, opened.session.figure.page_count), (0, 1));
+        assert_eq!(opened.session.figure.page, 0);
+        assert!(!opened.source().is_document(), "an SVG is opened at once");
     }
 
     #[test]
@@ -340,14 +394,17 @@ mod tests {
     }
 
     #[test]
-    fn every_page_of_a_pdf_can_be_opened_and_a_missing_one_is_refused() {
+    fn a_pdf_is_a_document_listing_its_pages_each_of_which_opens_and_a_missing_one_is_refused() {
         let dir = Scratch::new("pages");
         let ws = library();
         let path = dir.file("book.pdf", pdf_with_pages(3));
+        let source = ws.read(&path, OpenOptions::default()).unwrap();
+        assert!(source.is_document());
+        assert_eq!(source.contents().unwrap(), Contents { pages: 3, images: Vec::new() });
         for page in 0..3 {
             let opened = ws.open(&path, OpenOptions { page, ..Default::default() }).unwrap();
             let f = &opened.session.figure;
-            assert_eq!((f.page, f.page_count), (page, 3));
+            assert_eq!(f.page, page);
             let line = &f.primitives[0];
             let length = line.points[1].x - line.points[0].x;
             assert!((length - 10.0 * (page as f64 + 1.0)).abs() < 1e-6, "page {page} drew a line of {length}");

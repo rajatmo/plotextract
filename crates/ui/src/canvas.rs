@@ -541,7 +541,7 @@ mod frame_cost {
     use super::*;
 
     fn figure(primitives: Vec<Primitive>) -> Figure {
-        Figure { width: 576.0, height: 432.0, unit: Unit::Point, primitives, page: 0, page_count: 1, truncated: false }
+        Figure { width: 576.0, height: 432.0, unit: Unit::Point, primitives, page: 0, truncated: false }
     }
 
     fn prim(kind: PrimitiveKind, index: usize, points: Vec<Point>) -> Primitive {

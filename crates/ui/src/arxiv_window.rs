@@ -5,18 +5,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use egui::{Align, Color32, Context, CornerRadius, Key, Layout, RichText, Sense, Stroke, StrokeKind, Ui, vec2};
+use egui::{Align, Color32, Context, Key, Layout, RichText, Ui, vec2};
 use plotextract_ports::papers::{Figure, Kind, Paper};
 
-use crate::theme::{self, ACCENT};
+use crate::cards::{self, CARD, COLUMNS, Picture, plural, size};
+use crate::theme;
 use plotextract_model::{ArxivImport, Intent, Thumbnail};
 
-/// The width of the window's contents, and of a figure's card, in points.
-const WIDTH: f32 = 712.0;
-const CARD: egui::Vec2 = vec2(168.0, 178.0);
-const COLUMNS: usize = 4;
-/// The height of the picture on a card.
-const PICTURE: f32 = 122.0;
+/// The width of the window's contents, in points.
+pub const WIDTH: f32 = 712.0;
 
 #[derive(Default)]
 pub struct ArxivWindow {
@@ -30,11 +27,6 @@ pub struct ArxivWindow {
     focus: bool,
 }
 
-enum Picture {
-    Drawn(egui::TextureHandle),
-    Failed(String),
-}
-
 impl ArxivWindow {
     /// Keep the picture of a figure, if it is of the latest paper.
     pub fn receive(&mut self, ctx: &Context, thumbnail: Thumbnail) {
@@ -45,14 +37,7 @@ impl ArxivWindow {
         if thumbnail.id < self.job {
             return;
         }
-        let picture = match thumbnail.picture {
-            Ok(b) => {
-                let image = egui::ColorImage::from_rgba_unmultiplied([b.width as usize, b.height as usize], &b.rgba);
-                let name = format!("arxiv figure {}", thumbnail.path.display());
-                Picture::Drawn(ctx.load_texture(name, image, egui::TextureOptions::LINEAR))
-            }
-            Err(e) => Picture::Failed(e),
-        };
+        let picture = Picture::new(ctx, format!("arxiv figure {}", thumbnail.path.display()), thumbnail.picture);
         self.pictures.insert(thumbnail.path, picture);
     }
 
@@ -125,55 +110,14 @@ impl ArxivWindow {
 
     /// A figure's picture, name, format and size. A click chooses it, a double click imports it.
     fn card(&mut self, ui: &mut Ui, figure: &Figure, intents: &mut Vec<Intent>) {
-        let (rect, response) = ui.allocate_exact_size(CARD, Sense::click());
-        let visuals = ui.visuals();
         let chosen = self.selected.as_ref() == Some(&figure.path);
-        let stroke = if chosen {
-            Stroke::new(2.0, ACCENT)
-        } else if response.hovered() {
-            visuals.widgets.hovered.bg_stroke
-        } else {
-            visuals.widgets.noninteractive.bg_stroke
-        };
-        let painter = ui.painter_at(rect.expand(2.0));
-        painter.rect(rect, CornerRadius::same(6), visuals.faint_bg_color, stroke, StrokeKind::Inside);
-
-        let area = egui::Rect::from_min_size(rect.min + vec2(6.0, 6.0), vec2(CARD.x - 12.0, PICTURE));
-        match self.pictures.get(&figure.path) {
-            Some(Picture::Drawn(texture)) => {
-                let size = texture.size_vec2();
-                let k = (area.width() / size.x).min(area.height() / size.y);
-                let shown = egui::Rect::from_center_size(area.center(), size * k);
-                painter.rect_filled(shown, CornerRadius::ZERO, Color32::WHITE);
-                let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                painter.image(texture.id(), shown, uv, Color32::WHITE);
-            }
-            Some(Picture::Failed(_)) => {
-                let font = egui::TextStyle::Small.resolve(ui.style());
-                let color = visuals.weak_text_color();
-                painter.text(area.center(), egui::Align2::CENTER_CENTER, "No picture", font, color);
-            }
-            None => {
-                let spinner = egui::Rect::from_center_size(area.center(), vec2(18.0, 18.0));
-                ui.put(spinner, egui::Spinner::new());
-            }
-        }
-
-        let text =
-            egui::Rect::from_min_max(egui::pos2(rect.left() + 8.0, area.bottom() + 6.0), rect.max - vec2(8.0, 4.0));
         let file = figure.name.rsplit('/').next().unwrap_or(&figure.name);
         let ext = file.rsplit_once('.').map_or("", |(_, e)| e).to_ascii_uppercase();
         let mut about = format!("{ext} \u{b7} {}", size(figure.bytes));
         if !figure.cited {
             about += " \u{b7} not drawn";
         }
-        // the name and the format under it, inside the card whatever the row's layout
-        ui.scope_builder(egui::UiBuilder::new().max_rect(text).layout(Layout::top_down(Align::Min)), |ui| {
-            ui.set_width(text.width());
-            ui.spacing_mut().item_spacing.y = 1.0;
-            ui.add(egui::Label::new(RichText::new(file).strong()).truncate().selectable(false));
-            ui.add(egui::Label::new(RichText::new(about).small().weak()).truncate().selectable(false));
-        });
+        let response = cards::card(ui, self.pictures.get(&figure.path), chosen, file, &about);
 
         let drawn = if figure.cited { "The paper draws it." } else { "The paper's TeX files do not draw it." };
         let tip = match self.pictures.get(&figure.path) {
@@ -236,7 +180,7 @@ fn status(ui: &mut Ui, import: &ArxivImport) {
         let drawn = paper.figures.iter().filter(|f| f.cited).count();
         let text = match paper.kind {
             Kind::Pdf => {
-                format!("arXiv has only the PDF of {}: import it to work on the figures on its pages.", paper.id)
+                format!("arXiv has only the PDF of {}: import it to choose a page or an image in it.", paper.id)
             }
             Kind::Tex => format!("{} has no figure files: its source is a single TeX file.", paper.id),
             Kind::Archive if n == 0 => format!("{} has no figures in a format plotextract opens.", paper.id),
@@ -253,28 +197,5 @@ fn status(ui: &mut Ui, import: &ArxivImport) {
         theme::hint(ui, &text);
     } else {
         theme::hint(ui, "Its figures appear here.");
-    }
-}
-
-fn plural(n: usize) -> &'static str {
-    if n == 1 { "" } else { "s" }
-}
-
-/// A size in bytes, for a person.
-fn size(bytes: u64) -> String {
-    match bytes {
-        b if b < 1 << 10 => format!("{b} B"),
-        b if b < 1 << 20 => format!("{:.0} KB", b as f64 / 1024.0),
-        b => format!("{:.1} MB", b as f64 / f64::from(1 << 20)),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sizes_read_as_text() {
-        assert_eq!((size(512), size(150_000), size(8_406_248)), ("512 B".into(), "146 KB".into(), "8.0 MB".into()));
     }
 }

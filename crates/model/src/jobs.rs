@@ -10,8 +10,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    Analysed, AnalysisJob, ArxivFetched, ArxivJob, LineJob, LinesFound, LoadJob, Loaded, PieceJob, PiecesFound,
-    Thumbnail, ThumbnailJob,
+    Analysed, AnalysisJob, ArxivFetched, ArxivJob, LineJob, LinesFound, LoadJob, Loaded, PartPicture, PartPictureJob,
+    PieceJob, PiecesFound, Thumbnail, ThumbnailJob,
 };
 
 /// Work to run anywhere, once.
@@ -23,6 +23,7 @@ pub enum Job {
     Pieces(Box<PieceJob>),
     Arxiv(Box<ArxivJob>),
     Thumbnail(Box<ThumbnailJob>),
+    PartPicture(Box<PartPictureJob>),
 }
 
 /// What a job found.
@@ -33,6 +34,7 @@ pub enum Answer {
     Pieces(Box<PiecesFound>),
     Arxiv(Box<ArxivFetched>),
     Thumbnail(Thumbnail),
+    PartPicture(PartPicture),
 }
 
 impl Job {
@@ -45,6 +47,7 @@ impl Job {
             Job::Pieces(job) => Answer::Pieces(Box::new(job.run())),
             Job::Arxiv(job) => Answer::Arxiv(Box::new(job.run())),
             Job::Thumbnail(job) => Answer::Thumbnail(job.run()),
+            Job::PartPicture(job) => Answer::PartPicture(job.run()),
         }
     }
 }
