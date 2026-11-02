@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Suggest ticks, on step 3.** Two small networks trained for it (in the plotML project, on synthetic matplotlib
+  plots) find an image's ticks and read their labels: a tick finder (0.86 M parameters) marks where each tick meets its
+  axis and where its label is, and a reader (0.16 M) reads the label (`-0.25`, `10^-24`). On each axis the values must
+  lie on a line against position, or their logarithms must: the line through the most ticks decides the scale and drops
+  misreadings, and the two outermost ticks on it, placed by a least-squares fit, are set with their values. An axis
+  whose labels do not agree is left as it was. It runs offline in pure Rust (tract), on the crop with the painted areas
+  as paper, as a job: about 0.1 s an image. On held-out synthetic plots 98% are calibrated within 0.5% of the span; on
+  nine real arXiv figures every axis it set was right, and the axes it left were those with no numbers, or the x axis of
+  a heatmap. The networks are behind a port (`TickModels`), in the `plotextract-ticks` adapter, with the ONNX files.
+- **`corpus/tests/ticks.rs`** holds the Rust pipeline to plotML's on 60 plots (same axes, ticks within 0.15 px), and to
+  their truth; the `suggest` example runs it on any images and draws what it sets.
+
+### Changed
+- **Step 3's choices can be undone.** The ticks, their values and the log scales are kept in a `History` like the other
+  steps' edits: Ctrl+Z takes back a tick chosen or deleted, a value typed (all its keystrokes at once), a scale, or a
+  suggestion.
+- A debug build optimizes the tract crates, so the networks run at a usable speed there too.
+
 ## 1.1.0
 
 The tracing wizard's last two steps are done by hand: the pieces are grouped by how they look and the groups fixed, then

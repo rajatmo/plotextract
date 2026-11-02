@@ -1,6 +1,6 @@
 //! What every step of the wizard is to the wizard: something whose hand-made changes may be undone and redone. The
 //! wizard routes Ctrl+Z to the step on screen through this trait, so a step with an undo of its own (the exclude mask,
-//! the groups, the links) needs no arm in the wizard, and one without (the colours, the plot area, where everything is a
+//! the groups, the links, the ticks) needs no arm in the wizard, and one without (the colours, where everything is a
 //! choice made again) says so by not overriding it. Every history is a [`History`](plotextract_domain::History) of the
 //! step's own state.
 
@@ -46,7 +46,23 @@ impl WizardStep for PrepareStep {
 
 impl WizardStep for ColourStep {}
 
-impl WizardStep for PlotArea {}
+impl WizardStep for PlotArea {
+    fn can_undo(&self) -> bool {
+        PlotArea::can_undo(self)
+    }
+
+    fn can_redo(&self) -> bool {
+        PlotArea::can_redo(self)
+    }
+
+    fn undo(&mut self) -> bool {
+        PlotArea::undo(self)
+    }
+
+    fn redo(&mut self) -> bool {
+        PlotArea::redo(self)
+    }
+}
 
 impl WizardStep for ShapeStep {
     fn can_undo(&self) -> bool {

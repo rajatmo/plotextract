@@ -1,5 +1,6 @@
 //! Step 3, plot area: the search for straight lines, and the four ticks. Choosing happens here, on the right: select a tick,
-//! click its line in the image, type its plot value. Each tick's mask appears on the left once it has a line.
+//! click its line in the image, type its plot value; or have the tick networks suggest all four. Each tick's mask appears
+//! on the left once it has a line.
 
 use egui::{RichText, Ui};
 use plotextract_algo::lines::Algorithm;
@@ -7,7 +8,7 @@ use plotextract_domain::{Axis, Slot, format_g, parse_value};
 
 use super::{Output, WizardPanel};
 use crate::panel::{FIELD_HEIGHT, GRID_GAP, POSITION_COL, cell, value_field};
-use crate::theme::{self, Badge};
+use crate::theme::{self, Badge, Btn};
 use crate::wizard_canvas::tick_tint;
 use plotextract_model::Intent;
 use plotextract_model::text::{axis_status, slot_label};
@@ -29,6 +30,9 @@ impl WizardPanel {
             Badge { on: cal.is_calibrated(), tip: format!("x: {}, y: {}", axis_status(&cal.x), axis_status(&cal.y)) };
         theme::card_with_badge(ui, "Ticks", Some(badge), |ui| {
             theme::hint(ui, "Select a tick, click its line, type its value.");
+            if wizard.can_suggest_ticks() {
+                suggest_row(ui, wizard, &mut out.intents);
+            }
             ui.add_space(2.0);
             let value_width = (ui.available_width() - TICK_NAME - POSITION_COL - 2.0 * GRID_GAP).max(60.0);
             let axis_ok = [cal.x.map().is_ok(), cal.y.map().is_ok()];
@@ -81,6 +85,25 @@ impl WizardPanel {
                 theme::hint(ui, &format!("x: {}. y: {}.", axis_status(&cal.x), axis_status(&cal.y)));
             }
         });
+    }
+}
+
+/// The button that has the tick networks find the four ticks and read their values; a spinner while they look.
+fn suggest_row(ui: &mut Ui, wizard: &Wizard, intents: &mut Vec<Intent>) {
+    ui.add_space(2.0);
+    if wizard.suggesting() {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(RichText::new("Looking for the ticks\u{2026}").weak());
+        });
+        return;
+    }
+    let suggest = Btn::new("Suggest ticks").tip(
+        "Find the four ticks and read their values from the labels, for you to check. \
+         An axis whose labels cannot be read is left as it is. Ctrl+Z takes the suggestion back",
+    );
+    if theme::buttons(ui, &[suggest]) == Some(0) {
+        intents.push(Intent::Wizard(WizardIntent::SuggestTicks));
     }
 }
 

@@ -1,5 +1,5 @@
-//! Slow work: what the model asks the shell to do on another thread (open a file, look at the colours, search for lines or
-//! pieces, download a paper, draw a figure small), and what comes back. The model hands out [`Job`]s as effects and takes
+//! Slow work: what the model asks the shell to do on another thread (open a file, look at the colours, search for lines,
+//! pieces or ticks, download a paper, draw a figure small), and what comes back. The model hands out [`Job`]s as effects and takes
 //! the [`Answer`]s back with `Model::finish`; it never sees a thread. The shell runs them with one [`Runner`]: a thread
 //! for a job, a few workers for a batch, and one channel for every answer.
 //!
@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     Analysed, AnalysisJob, ArxivFetched, ArxivJob, LineJob, LinesFound, LoadJob, Loaded, PartPicture, PartPictureJob,
-    PieceJob, PiecesFound, Thumbnail, ThumbnailJob,
+    PieceJob, PiecesFound, Thumbnail, ThumbnailJob, TickJob, TicksFound,
 };
 
 /// Work to run anywhere, once.
@@ -21,6 +21,7 @@ pub enum Job {
     Analyse(Box<AnalysisJob>),
     Lines(Box<LineJob>),
     Pieces(Box<PieceJob>),
+    Ticks(Box<TickJob>),
     Arxiv(Box<ArxivJob>),
     Thumbnail(Box<ThumbnailJob>),
     PartPicture(Box<PartPictureJob>),
@@ -32,6 +33,7 @@ pub enum Answer {
     Analysed(Analysed),
     Lines(LinesFound),
     Pieces(Box<PiecesFound>),
+    Ticks(Box<TicksFound>),
     Arxiv(Box<ArxivFetched>),
     Thumbnail(Thumbnail),
     PartPicture(PartPicture),
@@ -45,6 +47,7 @@ impl Job {
             Job::Analyse(job) => Answer::Analysed(job.run()),
             Job::Lines(job) => Answer::Lines(job.run()),
             Job::Pieces(job) => Answer::Pieces(Box::new(job.run())),
+            Job::Ticks(job) => Answer::Ticks(Box::new(job.run())),
             Job::Arxiv(job) => Answer::Arxiv(Box::new(job.run())),
             Job::Thumbnail(job) => Answer::Thumbnail(job.run()),
             Job::PartPicture(job) => Answer::PartPicture(job.run()),

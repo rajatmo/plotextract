@@ -445,10 +445,10 @@ fn the_plot_area_step_finds_the_lines_of_the_axes_colour_and_ticks_are_chosen_by
     // the position is the coverage-weighted centre of the line: two black pixels at 70 and 71 are centred on 71.0
     assert!((w.tick_position(Slot::XMin).unwrap() - 71.0).abs() < 0.1);
     assert!((w.tick_position(Slot::XMax).unwrap() - 131.0).abs() < 0.1);
-    // choosing a line is not undone; a tick is deleted from its row
-    assert!(!w.can_undo());
+    // a tick is deleted from its row, and that can be undone like the choice of its line
     w.apply(WizardIntent::Delete(MaskId::Tick(Slot::XMin)));
     assert_eq!((w.tick(Slot::XMin), w.tick(Slot::XMax)), (None, Some(x130)));
+    assert!(w.undo() && w.tick(Slot::XMin) == Some(x70));
 }
 
 #[test]
@@ -547,6 +547,76 @@ fn the_ticks_and_their_typed_values_make_a_calibration() {
     assert_eq!(w.calibration().y.map().unwrap_err(), plotextract_domain::CalError::Incomplete);
     // the typed values stay with their ticks
     assert_eq!((w.tick_value(Slot::XMax), w.tick_value(Slot::YMax)), (Some(100.0), Some(1.0)));
+}
+
+#[test]
+fn the_ticks_their_values_and_the_scales_can_be_undone_a_typed_value_at_once() {
+    let mut w = Wizard::new(200, 150);
+    w.apply(WizardIntent::GoTo(Step::PlotArea));
+    assert!(!w.can_undo());
+    let tick = Line { orientation: Orientation::Vertical, from: 100.0, to: 105.0, across: 40.5, width: 1.0 };
+    w.apply(WizardIntent::SetTick(Slot::XMin, Some(tick)));
+    // a value typed key by key is one change
+    for value in [1.0, 12.0, 125.0] {
+        w.apply(WizardIntent::SetTickValue(Slot::XMin, Some(value)));
+    }
+    w.apply(WizardIntent::SetLog(Axis::X, true));
+    w.apply(WizardIntent::SetLog(Axis::X, true));
+    assert!(w.undo() && !w.is_log(Axis::X), "the scale; setting it again was no change");
+    assert!(w.undo() && w.tick_value(Slot::XMin).is_none(), "the value typed");
+    assert!(w.undo() && w.tick(Slot::XMin).is_none(), "the tick");
+    assert!(!w.undo());
+    assert!(w.redo() && w.redo() && w.tick_value(Slot::XMin) == Some(125.0));
+}
+
+/// Tick networks that are never run: the wizard only hands out the search.
+struct NoNetworks;
+
+impl TickModels for NoNetworks {
+    fn maps(&self, _: &[f32]) -> Result<Vec<f32>, plotextract_ports::ModelError> {
+        unreachable!()
+    }
+
+    fn read(&self, _: &[f32]) -> Result<Vec<f32>, plotextract_ports::ModelError> {
+        unreachable!()
+    }
+}
+
+#[test]
+fn suggested_ticks_set_the_axes_read_as_one_change_and_leave_the_others() {
+    use super::suggest::{SuggestedAxis, SuggestedTick};
+    let mut w = Wizard::new(200, 150);
+    w.apply(WizardIntent::GoTo(Step::PlotArea));
+    w.apply(WizardIntent::SuggestTicks);
+    assert!(!w.can_suggest_ticks() && !w.suggesting() && w.take_ticks_request().is_none(), "no networks, no search");
+
+    w.set_tick_models(Some(Arc::new(NoNetworks)));
+    // a y tick chosen by hand
+    let mine = Line { orientation: Orientation::Horizontal, from: 20.0, to: 25.0, across: 90.5, width: 1.0 };
+    w.apply(WizardIntent::SetTick(Slot::YMin, Some(mine)));
+    w.apply(WizardIntent::SuggestTicks);
+    assert!(w.suggesting());
+    assert!(w.take_ticks_request().is_some() && w.take_ticks_request().is_none(), "one search for one request");
+    w.begin_ticks(7);
+    let tick = |across: f32, value: f64| SuggestedTick {
+        line: Line { orientation: Orientation::Vertical, from: 120.0, to: 126.0, across, width: 1.0 },
+        value,
+    };
+    let x = SuggestedAxis { log: true, min: tick(30.5, 1e-3), max: tick(170.5, 10.0), fit: 5, of: 5 };
+    let suggestion = Suggestion { axes: [Some(x), None] };
+    assert!(w.finish_ticks(6, suggestion).is_none(), "the answer of another job is dropped");
+    assert!(w.suggesting());
+    assert_eq!(w.finish_ticks(7, suggestion), Some(suggestion));
+    assert!(!w.suggesting());
+    assert_eq!((w.tick_position(Slot::XMin), w.tick_value(Slot::XMin)), (Some(30.5), Some(1e-3)));
+    assert_eq!((w.tick_position(Slot::XMax), w.tick_value(Slot::XMax)), (Some(170.5), Some(10.0)));
+    assert!(w.is_log(Axis::X));
+    assert_eq!(w.tick(Slot::YMin), Some(mine), "the y axis was not read: what was chosen stays");
+    assert_eq!(w.active(), MaskId::Tick(Slot::YMax), "on to the first tick without a line");
+
+    assert!(w.undo());
+    assert!(w.tick(Slot::XMin).is_none() && w.tick(Slot::XMax).is_none() && !w.is_log(Axis::X), "taken back at once");
+    assert_eq!(w.tick(Slot::YMin), Some(mine));
 }
 
 #[test]

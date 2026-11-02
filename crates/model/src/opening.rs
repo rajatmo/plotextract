@@ -165,7 +165,9 @@ impl Model {
         let pictures = opened.picture_source();
         self.wizard = opened.needs_tracing().then(|| {
             let f = &opened.session.figure;
-            Wizard::new(f.width as u32, f.height as u32)
+            let mut w = Wizard::new(f.width as u32, f.height as u32);
+            w.set_tick_models(self.tick_models.clone());
+            w
         });
         let session = opened.session;
         let name = session.source.as_deref().map(|s| file_name(Path::new(s))).unwrap_or_default();

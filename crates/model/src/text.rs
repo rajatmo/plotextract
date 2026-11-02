@@ -29,6 +29,27 @@ pub fn axis_letter(slot: Slot) -> &'static str {
 
 pub use plotextract_usecases::wizard::{mask_name, tick_name};
 
+/// What the tick networks found: which axes they set, and what is left to the user.
+pub fn suggested(s: &plotextract_usecases::wizard::Suggestion) -> String {
+    let scale = |log: bool| if log { "log" } else { "linear" };
+    match &s.axes {
+        [Some(x), Some(y)] => format!(
+            "Suggested the ticks of both axes (x {}, y {}): check them before going on. Ctrl+Z takes them back.",
+            scale(x.log),
+            scale(y.log)
+        ),
+        [Some(x), None] => format!(
+            "Suggested the x axis' ticks ({}); the y axis' labels could not be read: choose its ticks by hand.",
+            scale(x.log)
+        ),
+        [None, Some(y)] => format!(
+            "Suggested the y axis' ticks ({}); the x axis' labels could not be read: choose its ticks by hand.",
+            scale(y.log)
+        ),
+        [None, None] => "No tick labels could be read: choose the ticks by hand.".into(),
+    }
+}
+
 /// Why the points of the links of the tracing wizard cannot be written.
 pub fn links_error(error: &ExportError) -> String {
     match error {

@@ -1,10 +1,12 @@
-//! Step 3, plot area: the straight lines of the axes colour (searched for as a job), the four ticks chosen from them with
-//! the plot values typed for them (the calibration), and the frame the later steps keep to.
+//! Step 3, plot area: the straight lines of the axes colour (searched for as a job), the four ticks chosen from them (or
+//! suggested by the tick networks) with the plot values typed for them (the calibration), and the frame the later steps
+//! keep to. The ticks, the values and the scales can be undone.
 
 use plotextract_algo::lines::{self, Algorithm, Line, Orientation};
-use plotextract_domain::{Axis, Calibration, Slot};
+use plotextract_domain::{Axis, Calibration, History, Slot};
 use plotextract_domain::{MaskMeta, PixelRect, Tag, Value};
 
+use super::suggest::{Suggest, Suggestion};
 use crate::colours::AxesSource;
 
 /// A search for straight lines in the axes colour, to be run on a thread: [`LineSearch::run`].
@@ -45,14 +47,24 @@ fn tick_tags(slot: Slot) -> [Tag; 2] {
     }
 }
 
-pub struct PlotArea {
+/// What the user chooses on the step: the ticks, their values, the scales. Every change to it can be undone.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Choices {
     /// The line chosen for each tick, in the order of [`Slot::ALL`].
     ticks: [Option<Line>; 4],
-    pub(super) show_ticks: [bool; 4],
     /// The plot value typed for each tick, in the order of [`Slot::ALL`].
     values: [Option<f64>; 4],
     /// Whether the x and the y axis are logarithmic.
     log: [bool; 2],
+}
+
+pub struct PlotArea {
+    choices: Choices,
+    history: History<Choices>,
+    /// The tick whose value was the last change: typing a value is one change, not one a keystroke.
+    typing: Option<Slot>,
+    pub(super) suggest: Suggest,
+    pub(super) show_ticks: [bool; 4],
     algorithm: Algorithm,
     params: lines::Params,
     /// The straight lines found in the axes colour.
@@ -66,10 +78,11 @@ pub struct PlotArea {
 impl Default for PlotArea {
     fn default() -> Self {
         Self {
-            ticks: [None; 4],
+            choices: Choices::default(),
+            history: History::default(),
+            typing: None,
+            suggest: Suggest::default(),
             show_ticks: [true; 4],
-            values: [None; 4],
-            log: [false; 2],
             algorithm: Algorithm::default(),
             params: lines::Params::default(),
             lines: Vec::new(),
@@ -97,7 +110,7 @@ impl PlotArea {
 
     /// The line chosen as tick `tick`.
     pub fn tick(&self, tick: Slot) -> Option<Line> {
-        self.ticks[index(tick)]
+        self.choices.ticks[index(tick)]
     }
 
     /// The first tick that has no line yet.
@@ -107,12 +120,12 @@ impl PlotArea {
 
     /// The plot value typed for tick `tick`.
     pub fn value(&self, tick: Slot) -> Option<f64> {
-        self.values[index(tick)]
+        self.choices.values[index(tick)]
     }
 
     /// Whether `axis` is logarithmic.
     pub fn is_log(&self, axis: Axis) -> bool {
-        self.log[usize::from(axis == Axis::Y)]
+        self.choices.log[usize::from(axis == Axis::Y)]
     }
 
     /// The calibration the chosen ticks and the typed values make: the positions are those of the ticks' lines, in image
@@ -129,16 +142,30 @@ impl PlotArea {
         calibration
     }
 
+    /// Change the choices, as one step to undo (a value typed after a value typed for the same tick is the same step).
+    /// Nothing is remembered if nothing changes.
+    fn change(&mut self, typing: Option<Slot>, f: impl FnOnce(&mut Choices)) {
+        let before = self.choices.clone();
+        f(&mut self.choices);
+        if self.choices != before {
+            if typing.is_none() || typing != self.typing {
+                self.history.record(before);
+            }
+            self.typing = typing;
+        }
+    }
+
     /// Make `line` tick `tick`, or take its line away. Whether it was done: a line of the wrong direction is not a tick.
     pub(super) fn set_tick(&mut self, tick: Slot, line: Option<Line>) -> bool {
         if line.is_some_and(|l| l.orientation != orientation_of(tick)) {
             return false;
         }
-        self.ticks[index(tick)] = line;
+        self.change(None, |c| c.ticks[index(tick)] = line);
         true
     }
 
-    /// Bring back saved ticks, values and settings. The lines are not looked for: that waits for the colours.
+    /// Bring back saved ticks, values and settings, with nothing to undo. The lines are not looked for: that waits for
+    /// the colours.
     pub(super) fn restore(
         &mut self,
         ticks: [Option<Line>; 4],
@@ -147,23 +174,57 @@ impl PlotArea {
         algorithm: Algorithm,
         params: lines::Params,
     ) {
-        for (slot, line) in Slot::ALL.into_iter().zip(ticks) {
-            self.set_tick(slot, line);
-        }
-        for (slot, value) in Slot::ALL.into_iter().zip(values) {
-            self.set_value(slot, value);
-        }
-        self.log = log;
+        let ticks = Slot::ALL.map(|slot| ticks[index(slot)].filter(|l| l.orientation == orientation_of(slot)));
+        self.choices = Choices { ticks, values: values.map(|v| v.filter(|v| v.is_finite())), log };
+        self.history.clear();
+        self.typing = None;
         self.algorithm = algorithm;
         self.params = params;
     }
 
     pub(super) fn set_value(&mut self, tick: Slot, value: Option<f64>) {
-        self.values[index(tick)] = value.filter(|v| v.is_finite());
+        self.change(Some(tick), |c| c.values[index(tick)] = value.filter(|v| v.is_finite()));
     }
 
     pub(super) fn set_log(&mut self, axis: Axis, on: bool) {
-        self.log[usize::from(axis == Axis::Y)] = on;
+        self.change(None, |c| c.log[usize::from(axis == Axis::Y)] = on);
+    }
+
+    /// Take the ticks suggested, as one step to undo: an axis suggested has its two ticks, their values and its scale
+    /// set; one not suggested is left as it was.
+    pub(super) fn take_suggestion(&mut self, suggestion: &Suggestion) {
+        self.change(None, |c| {
+            for (k, axis) in [Axis::X, Axis::Y].into_iter().enumerate() {
+                let Some(s) = &suggestion.axes[k] else { continue };
+                let (lo, hi) = match axis {
+                    Axis::X => (Slot::XMin, Slot::XMax),
+                    Axis::Y => (Slot::YMin, Slot::YMax),
+                };
+                for (slot, tick) in [(lo, s.min), (hi, s.max)] {
+                    c.ticks[index(slot)] = Some(tick.line);
+                    c.values[index(slot)] = Some(tick.value);
+                }
+                c.log[k] = s.log;
+            }
+        });
+    }
+
+    pub(super) fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    pub(super) fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
+    pub(super) fn undo(&mut self) -> bool {
+        self.typing = None;
+        self.history.undo(&self.choices).map(|c| self.choices = c).is_some()
+    }
+
+    pub(super) fn redo(&mut self) -> bool {
+        self.typing = None;
+        self.history.redo(&self.choices).map(|c| self.choices = c).is_some()
     }
 
     pub(super) fn set_algorithm(&mut self, algorithm: Algorithm) {

@@ -77,6 +77,23 @@ pub trait Importer: Send + Sync {
     }
 }
 
+/// The two small networks that find a plot's ticks and read their labels, behind whatever runs them. What goes in and
+/// what comes out is laid down by `plotextract_algo::ticks`, which makes the one and reads the other.
+pub trait TickModels: Send + Sync {
+    /// The tick finder on a plot fitted into its square: 512 x 512 grey levels, row by row, 0 ink to 1 paper. Its 8 maps of
+    /// 128 x 128 cells, map by map, row by row.
+    fn maps(&self, square: &[f32]) -> Result<Vec<f32>, ModelError>;
+
+    /// The reader on label crops, one after another, each 32 x 192 grey levels as above. For each crop, its 48 steps of
+    /// 14 scores.
+    fn read(&self, crops: &[f32]) -> Result<Vec<f32>, ModelError>;
+}
+
+/// A network that could not be run.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct ModelError(pub String);
+
 /// The files the user opens and saves.
 pub trait Files: Send + Sync {
     fn read(&self, path: &Path) -> std::io::Result<Vec<u8>>;

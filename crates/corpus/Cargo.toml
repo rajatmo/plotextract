@@ -23,6 +23,7 @@ plotextract-import.workspace = true
 plotextract-model.workspace = true
 plotextract-arxiv.workspace = true
 plotextract-algo.workspace = true
+plotextract-ticks.workspace = true
 image.workspace = true
 kurbo.workspace = true
 serde.workspace = true

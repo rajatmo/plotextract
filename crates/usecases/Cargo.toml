@@ -15,7 +15,7 @@ kurbo.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-image = { workspace = true, optional = true }
+image.workspace = true
 
 [dev-dependencies]
 plotextract-pdf.workspace = true
@@ -27,4 +27,4 @@ image.workspace = true
 
 [features]
 # the wizards on generated plots that tests set up
-fixtures = ["dep:image"]
+fixtures = []

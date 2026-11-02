@@ -2,8 +2,8 @@
 
 plotextract is a Rust workspace of small crates in layers, ports and adapters style. One rule shapes it: **every
 dependency points inward**. The domain depends on nothing of ours; the algorithms and the ports on the domain; the use
-cases on those three; the model on the use cases; the window on the model. The adapters (file formats, arXiv, the disk)
-implement the ports, and only the composition root knows them all. `crates/corpus/tests/layers.rs` checks the rule on
+cases on those three; the model on the use cases; the window on the model. The adapters (file formats, arXiv, the disk,
+the tick networks) implement the ports, and only the composition root knows them all. `crates/corpus/tests/layers.rs` checks the rule on
 every crate's manifest, and that nothing inside the model knows a window, the network, a file format or the disk.
 
 ```
@@ -11,22 +11,22 @@ composition root  plotextract (crates/app)   builds the adapters, hands them to 
 ui                plotextract-ui             egui: the shell, panels, canvas, a tool for each step of the wizard
 model             plotextract-model          intents in, effects out, jobs handed to the shell; the wording of messages
 use cases         plotextract-usecases       the vector session, the library of files, the tracing wizard
-ports             plotextract-ports          Importer, PictureSource, PaperSource, Files
-algorithms        plotextract-algo           decoding, ink colours, straight lines, pieces and their groups; pure
+ports             plotextract-ports          Importer, PictureSource, PaperSource, Files, TickModels
+algorithms        plotextract-algo           decoding, ink colours, straight lines, pieces and their groups, ticks; pure
 domain            plotextract-domain         figure, primitives, calibration, series, history, snap index, masks
-adapters          plotextract-pdf, -svg, -ps (+ -import), -image, -arxiv, -fs: the ports implemented
+adapters          plotextract-pdf, -svg, -ps (+ -import), -image, -arxiv, -fs, -ticks: the ports implemented
 ```
 
 Inside, the patterns are few and named:
 
 - **Ports and adapters.** A format is an `Importer` (with its `PictureSource`); arXiv is a `PaperSource`; the disk is
-  `Files`. The use cases see only the traits, so the tests swap in fakes (an arXiv that serves one tar from memory) and
+  `Files`; the networks that suggest the ticks are `TickModels`. The use cases see only the traits, so the tests swap in fakes (an arXiv that serves one tar from memory) and
   the composition root chooses the real ones.
 - **Model, view, update.** The window turns input into `Intent`s; `Model::dispatch` changes the state and returns
   `Effect`s that only the shell can perform (a dialog, the clipboard, a thread).
 - **Command and memento.** Every change that can be undone is a value (an exclude shape, an edit of the groups, a link)
   applied to state whose earlier versions a `History` keeps; one `History` type serves the vector session, the exclude
-  mask, the groups and the links.
+  mask, the ticks, the groups and the links.
 - **State.** The wizard's steps are modules that own their state; the `WizardStep` trait is what each is to the wizard
   (its undo), so Ctrl+Z reaches the step on screen with no arm per step.
 - **Strategy.** The straight lines are found by an `Algorithm` the user picks (the Hough transform or the line segment
@@ -118,7 +118,24 @@ has settings (`lines::Params`: the shortest and widest line and, for the line se
 enlarged first, since it accepts a segment only if it has more aligned pixels than chance explains); the wizard holds them
 and looks again whenever they change. The search runs on a thread like the colour analysis (`Job::Lines`),
 but only one at a time: a change made while one runs is remembered, and the answer of the running one starts the next. The
-lines found before stay on the image until the new ones arrive.
+lines found before stay on the image until the new ones arrive. The ticks, their values and the log scales are one state
+(`Choices`) with a `History`, so each change to them can be undone; the keystrokes of a value typed are one change.
+
+**Suggest ticks** fills in the four ticks with two small networks trained in the plotML project (beside this
+repository): a tick finder (CenterNet style: from the plot fitted into 512 x 512, maps at a quarter of that of where x
+and y ticks meet their axes and where their labels are, with each label's size) and a reader (a CRNN read with CTC over
+`0123456789-.^`). The port `TickModels` runs them and nothing else (`maps`, `read`: floats in, floats out); the
+`plotextract-ticks` adapter does it with tract, with the ONNX files built in and each network made ready the first time
+it is used. Everything around them is pure and in `plotextract_algo::ticks`: the grey image fitted into the square, the
+peaks of the maps, each tick's label (the nearest below an x tick, left of a y tick), the label's crop, the reader's
+output decoded, the text made a value, each tick's mark (the ink that stands out from the axis line there, its mask),
+and `calibrate`: the line through the most (position, value) pairs, or (position, log value), within 2% of the range,
+which decides the scale (linear unless the log fit takes in more ticks, fits much better, or most labels are powers)
+and drops misreadings; a least-squares fit through the ticks on it places the outermost two. These are the steps of
+plotML's `pipeline.py`, and `corpus/tests/ticks.rs` holds them to its results. `TickSearch` (in the use cases) runs it all
+on the crop, with the painted areas as paper, as `Job::Ticks`; the answer is taken as one change to undo, and an axis
+that was not calibrated is left as it was. The model has the networks only if the composition root gives them
+(`Model::with_tick_models`); without them the button is not shown.
 
 The fourth step (**Shapes**) groups the pieces of the curve colours, and lets the groups be fixed by hand; nothing else.
 `plotextract_algo::curves::find` breaks the mask of each colour tagged curve into pieces, its connected components

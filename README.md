@@ -49,7 +49,8 @@ it, and the pointer on a row outlines its curve on the page. On the right is wha
 ## Images: traced
 
 An image is traced in five steps. Each step makes **masks**, listed on the left with an eye to show or hide each one;
-the right panel is the step you are on. Nothing is guessed: the steps measure and group, and you say what things are.
+the right panel is the step you are on. Nothing is guessed unasked: the steps measure and group, and you say what things
+are. The one guess is the one you ask for, *Suggest ticks* on step 3, and you check what it suggests.
 
 1. **Crop and mask.** Drag out the plot, and paint over what is in the way (a legend, a colour bar, a label crossing a
    curve) with a brush, a rectangle or a polygon. What is painted over is ignored, not read as paper.
@@ -57,8 +58,12 @@ the right panel is the step you are on. Nothing is guessed: the steps measure an
    (black is often both the axes and a curve). A colour you say nothing about is ignored. Hover the image to see where a
    colour is used.
 3. **Plot area.** Straight lines are found in the axes colour. Choose a tick, click its line, and type its value, for
-   each of the four; tick *log* for a logarithmic axis. The frame's sides found here are cut out of a colour that is
-   both the axes and a curve, so a curve touching the frame is not one piece with it.
+   each of the four; tick *log* for a logarithmic axis. Or press **Suggest ticks**: two small networks built into the
+   program find the ticks and read their labels (`0.25`, `10^-24`), offline, in about a tenth of a second, and an axis
+   whose labels agree on a line, or on a log scale, gets its two outermost ticks, their values and its scale. Check them;
+   an axis whose labels cannot be read is left as it was, and Ctrl+Z takes the suggestion back (and undoes any tick,
+   value or scale chosen on this step). The frame's sides found here are cut out of a colour that is both the axes and a
+   curve, so a curve touching the frame is not one piece with it.
 4. **Shapes.** The curve colours are broken into pieces, and pieces are grouped by how they look: each long stroke is a
    **line**, and many pieces alike (dots, dashes, markers) are a **repeated shape**; the few like no other are left in
    **no group**. Every piece is drawn in its group's colour over the darkened image, and ringed when it is small, so even

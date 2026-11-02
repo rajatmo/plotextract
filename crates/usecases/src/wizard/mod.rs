@@ -9,6 +9,7 @@
 //! tagged curve. Nothing says what a colour or a group is but the user: the steps measure and group, the user names.
 //!
 //! What is done with a hand that slips can be undone (Ctrl+Z and Ctrl+Shift+Z): drawing the exclude mask on step 1, the
+//! ticks, their values and the scales on step 3 (ticks suggested by the tick networks among them, [`suggest`]), the
 //! changes to the groups on step 4 and to the links on step 5. Everything else is a choice that is simply made again, or
 //! a mask that is deleted from its row.
 //!
@@ -23,6 +24,7 @@ mod plot_area;
 mod prepare;
 mod shape_step;
 mod step;
+pub mod suggest;
 mod work;
 
 use std::sync::Arc;
@@ -35,6 +37,7 @@ use plotextract_algo::shapes::Shapes;
 use plotextract_algo::{ColourMap, ColourParams};
 use plotextract_domain::{Axis, Calibration, ExportError, Primitive, PrimitiveKind, Series, Slot};
 use plotextract_domain::{MaskMeta, PixelRect, Prepare, Tag};
+use plotextract_ports::TickModels;
 
 pub use self::colour_step::ColourStep;
 pub use self::intent::{Pen, Pick, Step, Tool, WizardIntent};
@@ -43,6 +46,7 @@ pub use self::masks::{MaskId, mask_key, mask_name, tick_name};
 pub use self::plot_area::{LineSearch, PlotArea, on_x_axis, orientation_of};
 pub use self::prepare::PrepareStep;
 pub use self::shape_step::{Found, PieceSearch, ShapeStep};
+pub use self::suggest::{Suggestion, TickSearch};
 pub(crate) use self::work::rgb_distance;
 pub use self::work::{InkWork, Work};
 pub use crate::colours::{Colours, Role};
@@ -413,6 +417,50 @@ impl Wizard {
         self.plot_area.busy()
     }
 
+    /// Give the wizard the tick networks, so it can suggest the ticks (or take them away).
+    pub fn set_tick_models(&mut self, models: Option<Arc<dyn TickModels>>) {
+        self.plot_area.suggest.models = models;
+    }
+
+    /// Whether the ticks can be suggested: the program has the tick networks.
+    pub fn can_suggest_ticks(&self) -> bool {
+        self.plot_area.suggest.models.is_some()
+    }
+
+    /// Whether ticks are being suggested.
+    pub fn suggesting(&self) -> bool {
+        self.plot_area.suggest.busy()
+    }
+
+    /// If ticks were asked for and none are being looked for, the search to run (once).
+    pub fn take_ticks_request(&mut self) -> Option<TickSearch> {
+        let prepare = self.prepare.prepare().clone();
+        self.plot_area.suggest.take(&prepare)
+    }
+
+    /// The search for ticks was started as job `id`.
+    pub fn begin_ticks(&mut self, id: u64) {
+        self.plot_area.suggest.begin(id);
+    }
+
+    /// The answer of job `id`, taken (as one change to undo) and given back; `None` for the answer of any other job,
+    /// which is dropped. The tick selected is the first left without a line.
+    pub fn finish_ticks(&mut self, id: u64, suggestion: Suggestion) -> Option<Suggestion> {
+        if !self.plot_area.suggest.finish(id) {
+            return None;
+        }
+        self.plot_area.take_suggestion(&suggestion);
+        if self.step == Step::PlotArea {
+            self.active = MaskId::Tick(self.plot_area.first_unset().unwrap_or(Slot::XMin));
+        }
+        Some(suggestion)
+    }
+
+    /// The search for ticks, job `id`, failed: it is no longer waited for.
+    pub fn fail_ticks(&mut self, id: u64) {
+        self.plot_area.suggest.finish(id);
+    }
+
     // --- step 4 ---------------------------------------------------------------------------------------------------
 
     /// How the curve colours are broken into pieces.
@@ -727,6 +775,7 @@ impl Wizard {
             WizardIntent::SetLineParams(params) => self.plot_area.set_params(params),
             WizardIntent::SetTickValue(tick, value) => self.plot_area.set_value(tick, value),
             WizardIntent::SetLog(axis, on) => self.plot_area.set_log(axis, on),
+            WizardIntent::SuggestTicks => self.plot_area.suggest.want(),
             WizardIntent::SetTick(tick, line) => {
                 // on to the next tick that has no line yet
                 if self.plot_area.set_tick(tick, line) && line.is_some() {

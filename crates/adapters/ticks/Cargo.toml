@@ -1,0 +1,12 @@
+[package]
+name = "plotextract-ticks"
+description = "The tick networks (finder and reader) behind the TickModels port, run by tract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+plotextract-ports.workspace = true
+tract-onnx.workspace = true

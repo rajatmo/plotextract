@@ -126,6 +126,9 @@ pub enum WizardIntent {
     SetTickValue(Slot, Option<f64>),
     /// Whether an axis is logarithmic.
     SetLog(Axis, bool),
+    /// Have the tick networks find the four ticks and read their values (a job); an axis they can read is set, as one
+    /// change to undo.
+    SuggestTicks,
     /// How the curve colours are broken into pieces.
     SetCurveParams(curves::Params),
     /// How alike pieces must be to be copies of one shape.

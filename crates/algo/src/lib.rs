@@ -6,12 +6,14 @@
 //! - [`lines`]: the straight lines of a mask (the Hough transform or the line segment detector).
 //! - [`curves`]: the pieces a mask breaks into, with the lines of the axes cut out.
 //! - [`shapes`]: the pieces grouped by how they look, and the edits that fix the groups.
+//! - [`ticks`]: the four ticks from what the tick networks find and read, but for running the networks.
 
 pub mod colours;
 pub mod curves;
 pub mod decode;
 pub mod lines;
 pub mod shapes;
+pub mod ticks;
 
 // the masks are domain types; the algorithms name them as before
 use plotextract_domain::raster::{mask, prepare};

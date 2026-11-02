@@ -15,8 +15,11 @@ use std::sync::Arc;
 use plotextract_algo::lines::Line;
 use plotextract_algo::{ColourMap, ColourParams, analyse_colours, decode};
 use plotextract_domain::{ArxivId, Bitmap, Edit, ImportError, Layer, OpenOptions, Pick, Prepare, Project, Slot};
+use plotextract_ports::TickModels;
 use plotextract_ports::papers::{ArxivError, Paper, PaperSource, Progress};
-use plotextract_usecases::wizard::{Found, LineSearch, PieceSearch, Wizard, WizardIntent, Work};
+use plotextract_usecases::wizard::{
+    Found, LineSearch, PieceSearch, Suggestion, TickSearch, Wizard, WizardIntent, Work,
+};
 use plotextract_usecases::{Opened, Session, SessionError, Source, Workspace, WorkspaceError};
 
 mod arxiv_import;
@@ -31,7 +34,7 @@ mod tracing;
 pub use self::arxiv_import::{ArxivFetched, ArxivImport, ArxivJob, Thumbnail, ThumbnailJob};
 pub use self::opening::{LoadJob, Loaded, PasswordPrompt};
 pub use self::pdf_import::{Document, Part, PartPicture, PartPictureJob, PdfImport};
-pub use self::tracing::{Analysed, AnalysisJob, LineJob, LinesFound, PieceJob, PiecesFound};
+pub use self::tracing::{Analysed, AnalysisJob, LineJob, LinesFound, PieceJob, PiecesFound, TickJob, TicksFound};
 use crate::jobs::{Answer, Job};
 
 /// Something the user wants done.
@@ -142,6 +145,8 @@ pub struct Model {
     pdf: PdfImport,
     /// Where papers come from.
     papers: Arc<dyn PaperSource>,
+    /// The networks that suggest an image's ticks, if the program has them.
+    tick_models: Option<Arc<dyn TickModels>>,
 }
 
 impl Model {
@@ -161,7 +166,15 @@ impl Model {
             arxiv: ArxivImport::default(),
             pdf: PdfImport::default(),
             papers,
+            tick_models: None,
         }
+    }
+
+    /// The model with the networks that suggest an image's ticks (a port, chosen by the composition root). Without them
+    /// the ticks are only chosen by hand.
+    pub fn with_tick_models(mut self, models: Arc<dyn TickModels>) -> Self {
+        self.tick_models = Some(models);
+        self
     }
 
     /// The Import from arXiv window, while it is open.
@@ -222,6 +235,10 @@ impl Model {
             }
             Answer::Lines(found) => self.finish_lines(found),
             Answer::Pieces(found) => self.finish_pieces(*found),
+            Answer::Ticks(found) => {
+                self.finish_ticks(*found);
+                Vec::new()
+            }
             Answer::Arxiv(fetched) => self.finish_arxiv(*fetched),
             Answer::Thumbnail(_) | Answer::PartPicture(_) => Vec::new(),
         }

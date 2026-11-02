@@ -1,5 +1,6 @@
-//! The tracing wizard's jobs: the analysis of the colours, the search for lines and the search for pieces and shapes,
-//! each run on a thread, one at a time, the answer of a job no longer waited for dropped.
+//! The tracing wizard's jobs: the analysis of the colours, the search for lines, the search for pieces and shapes, and
+//! the tick networks' search for the ticks, each run on a thread, one at a time, the answer of a job no longer waited for
+//! dropped.
 
 use super::*;
 
@@ -83,6 +84,35 @@ pub struct PiecesFound {
     pub(super) found: Found,
 }
 
+/// A search for the four ticks by the tick networks. Run it anywhere with [`TickJob::run`].
+pub struct TickJob {
+    pub(super) id: u64,
+    pub(super) bytes: Arc<Vec<u8>>,
+    pub(super) search: TickSearch,
+}
+
+impl std::fmt::Debug for TickJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TickJob").field("id", &self.id).finish_non_exhaustive()
+    }
+}
+
+impl TickJob {
+    /// The slow part: read the pixels and run the networks. Safe to call on any thread.
+    pub fn run(self) -> TicksFound {
+        let result = decode::decode(&self.bytes)
+            .map_err(|e| e.to_string())
+            .and_then(|image| self.search.run(&image).map_err(|e| e.to_string()));
+        TicksFound { id: self.id, result }
+    }
+}
+
+/// The answer to a [`TickJob`].
+pub struct TicksFound {
+    pub(super) id: u64,
+    pub(super) result: Result<Suggestion, String>,
+}
+
 impl Model {
     /// Take the answer of an [`AnalysisJob`]. An answer to a job that is no longer the one waited for is dropped.
     pub fn finish_analysis(&mut self, analysed: Analysed) {
@@ -121,6 +151,23 @@ impl Model {
         fx
     }
 
+    /// Take the answer of a [`TickJob`]: the ticks suggested are set, and the status says what was found. An answer to a
+    /// job no longer waited for is dropped.
+    pub fn finish_ticks(&mut self, found: TicksFound) {
+        let Some(w) = &mut self.wizard else { return };
+        match found.result {
+            Ok(suggestion) => {
+                if let Some(s) = w.finish_ticks(found.id, suggestion) {
+                    self.info(text::suggested(&s));
+                }
+            }
+            Err(e) => {
+                w.fail_ticks(found.id);
+                self.error(format!("Cannot suggest the ticks: {e}"));
+            }
+        }
+    }
+
     /// Start a search for the pieces of the curves if the wizard asks for one and none is running.
     pub(super) fn start_pieces_if_wanted(&mut self, fx: &mut Vec<Effect>) {
         let Some(w) = &mut self.wizard else { return };
@@ -136,6 +183,19 @@ impl Model {
         self.start_analysis_if_wanted(fx);
         self.start_lines_if_wanted(fx);
         self.start_pieces_if_wanted(fx);
+        self.start_ticks_if_wanted(fx);
+    }
+
+    /// Start a search for the ticks if the wizard asks for one.
+    fn start_ticks_if_wanted(&mut self, fx: &mut Vec<Effect>) {
+        let (Some(w), Some(source)) = (&mut self.wizard, &self.source) else { return };
+        let Some(search) = w.take_ticks_request() else { return };
+        self.next_job += 1;
+        let id = self.next_job;
+        w.begin_ticks(id);
+        let bytes = source.bytes().clone();
+        self.info("Looking for the ticks\u{2026}");
+        fx.push(Effect::Run(Job::Ticks(Box::new(TickJob { id, bytes, search }))));
     }
 
     /// Start a search for lines if the wizard asks for one and none is running.

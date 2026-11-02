@@ -1,5 +1,5 @@
 //! The composition root: the one place that knows every concrete piece. It builds the adapters (the file formats,
-//! arXiv, the local disk), hands them to the model through their ports, and runs the window.
+//! arXiv, the local disk, the tick networks), hands them to the model through their ports, and runs the window.
 
 // A release build on Windows is a GUI program: no console window behind it.
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
@@ -38,5 +38,6 @@ fn main() -> plotextract_ui::Result {
     let workspace = Workspace::new(registry(), Arc::new(plotextract_fs::LocalFiles))
         .with_cache(cache.parent().map_or_else(|| cache.clone(), PathBuf::from));
     let papers = Arc::new(ArxivPapers::new(Arc::new(Arxiv), cache));
-    plotextract_ui::run(Model::new(workspace, papers), args.file)
+    let model = Model::new(workspace, papers).with_tick_models(Arc::new(plotextract_ticks::OnnxTicks::new()));
+    plotextract_ui::run(model, args.file)
 }

@@ -106,6 +106,23 @@ a legend dash outside the frame, and check through intents that each curve colou
 legend, that the series is written in plot values, that pieces are moved between series by hand and kept when the pieces
 are found again, and that the search runs as a job after the line search.
 
+### Suggested ticks (`crates/algo/src/ticks.rs`, `crates/corpus/tests/ticks.rs`, `crates/corpus/examples/suggest.rs`)
+
+The unit tests check what is made of the networks' output: labels read as numbers and powers, the reader's output
+decoded, a misreading dropped and the ends fitted, decades evenly spaced taken as a log axis, a tick's mark found beside
+its axis line; the adapter's test loads both networks and checks the sizes of what they give. The wizard's tests check that
+a suggestion is one change to undo, sets only the axes it calibrates, and that the answer of a stale job is dropped.
+
+`corpus/tests/ticks.rs` needs `testdata/ticks/`, written by plotML (`python eval/parity.py runs/det_w16_large
+runs/rd_w16_large data/val300 ../testdata/ticks`): 60 held-out synthetic plots, their truth, and what plotML's Python
+pipeline finds on them. The Rust pipeline must agree on at least 97% of the axes (scale, how many ticks agree, the ends
+within 0.15 px and the same values; it agrees on all 120) and calibrate at least 93% of the plots right (59 of 60). A
+second test drives Suggest ticks through the model on one of them, and Ctrl+Z. Write `testdata/ticks/` again whenever
+the networks in `crates/adapters/ticks/models` change.
+
+`cargo run --release -p plotextract-corpus --example suggest -- outdir image.png ...` prints what Suggest ticks sets on
+each image and draws it on a copy in `outdir`, to check real figures by eye.
+
 ### Shapes of an image (`crates/algo/src/shapes.rs`, `crates/corpus/examples/shapes.rs`)
 
 The unit tests draw the things a curve mask holds and check how the pieces are grouped: alike pieces are one group however
