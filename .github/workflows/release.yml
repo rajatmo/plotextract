@@ -13,11 +13,6 @@ on:
 permissions:
   contents: write
 
-# one release at a time, and never half of one
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 jobs:
   version:
     runs-on: ubuntu-latest
@@ -65,7 +60,7 @@ jobs:
           # the oldest supported glibc: the Linux binary runs on anything newer
           - { os: ubuntu-22.04, script: "bash scripts/dist.sh dist" }
           - { os: macos-latest, script: "bash scripts/dist.sh dist" } # Apple silicon
-          - { os: macos-13, script: "bash scripts/dist.sh dist" } # Intel
+          - { os: macos-15-intel, script: "bash scripts/dist.sh dist" } # Intel
           - { os: windows-latest, script: "pwsh scripts/dist.ps1 -Out dist" }
     runs-on: ${{ matrix.os }}
     steps:
