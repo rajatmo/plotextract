@@ -3650,7 +3650,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "plotextract"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "clap",
  "plotextract-arxiv",
@@ -3669,7 +3669,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-algo"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "image",
  "imageproc",
@@ -3683,7 +3683,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-arxiv"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "flate2",
  "plotextract-domain",
@@ -3695,7 +3695,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-corpus"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "image",
  "kurbo",
@@ -3718,7 +3718,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-domain"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "kurbo",
  "serde",
@@ -3728,14 +3728,14 @@ dependencies = [
 
 [[package]]
 name = "plotextract-fs"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "plotextract-ports",
 ]
 
 [[package]]
 name = "plotextract-image"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "image",
  "kurbo",
@@ -3748,7 +3748,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-import"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "kurbo",
  "plotextract-domain",
@@ -3756,7 +3756,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-model"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "flate2",
  "image",
@@ -3777,7 +3777,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-pdf"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "hayro",
  "hayro-interpret",
@@ -3792,7 +3792,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-ports"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "kurbo",
  "plotextract-domain",
@@ -3801,7 +3801,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-ps"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "kurbo",
  "plotextract-domain",
@@ -3813,7 +3813,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-svg"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "kurbo",
  "plotextract-domain",
@@ -3825,7 +3825,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-ticks"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "plotextract-ports",
  "tract-onnx",
@@ -3833,7 +3833,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-ui"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -3856,7 +3856,7 @@ dependencies = [
 
 [[package]]
 name = "plotextract-usecases"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "image",
  "kurbo",

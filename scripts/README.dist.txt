@@ -15,7 +15,8 @@ click menu records the selected point too, and hides the selected curve (grid li
 Export CSV or Copy numbers write the active series as x,y.
 
 A raster image (PNG, JPEG, GIF, BMP, TIFF, WebP) opens in the tracing wizard: crop and mask, the colours (say what each
-is: nothing is guessed), the four ticks with the plot value of each, and the shapes: the pieces of the curve colours
+is: nothing is guessed), the four ticks with the plot value of each (Suggest ticks finds and reads them for you to
+check), and the shapes: the pieces of the curve colours
 grouped by how they look, each drawn in its group's colour and ringed when small. Fix the groups: select pieces (click a
 piece for its group, Shift+click to add a group, drag around pieces) and Make one group (G) or Remove (Delete). Then
 link the pieces of a curve in order, as with a pen: click piece after piece (or drag through them), double-click to end

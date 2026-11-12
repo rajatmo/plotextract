@@ -1,17 +1,63 @@
 name: release
 
-# Builds the app on every platform and keeps the packages as workflow artifacts. Pushing a tag like v1.0.0 also attaches
-# them to a GitHub release.
+# A push to main releases the version in Cargo.toml if it has no tag yet: the packages are built on every platform, the
+# tag (v1.2.0) is made on that commit and the packages are attached to a GitHub release with that version's part of
+# CHANGELOG.md. A push that does not change the version releases nothing. Pushing a tag like v1.2.0 by hand releases it
+# too, and a manual run builds the packages and keeps them as workflow artifacts only.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# one release at a time, and never half of one
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 --locked \
+            | jq -r '.packages[] | select(.name == "plotextract") | .version')
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "::error::could not read the version of the plotextract package"
+            exit 1
+          fi
+          tag="v$version"
+          release=false
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ "$GITHUB_REF_NAME" != "$tag" ]; then
+              echo "::error::the tag $GITHUB_REF_NAME is not the version in Cargo.toml ($version)"
+              exit 1
+            fi
+            release=true
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+              echo "$tag is already released: nothing to do"
+            else
+              release=true
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: version
+    if: needs.version.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -36,14 +82,32 @@ jobs:
             dist/*.tar.gz
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [version, build]
+    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: packages
           merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          awk -v v="$VERSION" '
+            /^## / { on = ($2 == v); next }
+            on
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/CHANGELOG.md)." > notes.md
+          fi
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.version.outputs.tag }}
+          body_path: notes.md
           files: packages/*
+          fail_on_unmatched_files: true

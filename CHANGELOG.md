@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
 
 ### Added
 - **Suggest ticks, on step 3.** Two small networks trained for it (in the plotML project, on synthetic matplotlib
