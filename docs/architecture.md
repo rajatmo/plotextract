@@ -443,7 +443,8 @@ crates/
   adapters/        import (shared by the vector formats), pdf, svg, ps, image, arxiv, fs
   corpus/          accuracy, stress and layering tests on real plots, and the command line tools
 docs/              architecture, testing, the demo (GIF and MP4)
-scripts/           dist.ps1, dist.sh and the text shipped with the packages
+scripts/           dist.ps1, dist.sh, installer.ps1 (MSI), appimage.sh and the text shipped with the packages
+wix/               the source of the Windows installer and its licence page
 .github/           CI and release workflows
 CHANGELOG.md
 ```

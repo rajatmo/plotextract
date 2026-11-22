@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The Windows installer (MSI), built by scripts\installer.ps1 with WiX 5:
+
+    wix build wix\plotextract.wxs -arch x64 -ext WixToolset.UI.wixext
+        -d Version=1.2.0 -d Source=<folder made by dist.ps1> -d Repo=<this repository> -o plotextract.msi
+
+  It installs for all users into Program Files, with a Start menu shortcut and an entry in Apps and features.
+  A newer version replaces an older one in place. The UpgradeCode must never change: it is how Windows knows two
+  versions are the same program.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="plotextract"
+           Manufacturer="Rajat Mandal"
+           Version="$(Version)"
+           UpgradeCode="64DEF298-8B15-4AB6-B023-C8C280A579FB"
+           Scope="perMachine"
+           Compressed="yes">
+    <SummaryInformation Description="Pick curves from plots and export them as data in plot units" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of plotextract is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon.ico" SourceFile="$(Repo)\crates\ui\assets\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/rajatmo/plotextract" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/rajatmo/plotextract" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="plotextract">
+        <Component Id="AppExe">
+          <File Id="AppExe" Source="$(Source)\plotextract.exe" KeyPath="yes">
+            <Shortcut Id="StartMenuShortcut"
+                      Directory="ProgramMenuFolder"
+                      Name="plotextract"
+                      Description="Pick curves from plots and export them as data"
+                      Icon="AppIcon.ico"
+                      Advertise="yes" />
+          </File>
+        </Component>
+        <Component Id="Readme">
+          <File Id="Readme" Source="$(Source)\README.txt" KeyPath="yes" />
+        </Component>
+        <Component Id="LicenseMit">
+          <File Id="LicenseMit" Source="$(Source)\LICENSE-MIT" KeyPath="yes" />
+        </Component>
+        <Component Id="LicenseApache">
+          <File Id="LicenseApache" Source="$(Source)\LICENSE-APACHE" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="plotextract" Level="1">
+      <ComponentRef Id="AppExe" />
+      <ComponentRef Id="Readme" />
+      <ComponentRef Id="LicenseMit" />
+      <ComponentRef Id="LicenseApache" />
+    </Feature>
+
+    <!-- welcome, licence, folder, install -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(Repo)\wix\License.rtf" />
+  </Package>
+</Wix>

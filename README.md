@@ -9,9 +9,15 @@ The same demo at full size: [docs/demo.mp4](docs/demo.mp4) (1480 × 1090, 1 minu
 
 ## Download
 
-Get the package for your system from the [releases page](https://github.com/rajatmo/plotextract/releases), unpack it and
-run `plotextract`. There is nothing to install. On Linux you need X11 or Wayland and a graphics driver. On macOS the app
-is unsigned: right-click it and choose Open the first time.
+Get the package for your system from the [releases page](https://github.com/rajatmo/plotextract/releases):
+
+- **Windows:** the installer (`.msi`) puts plotextract in Program Files and the Start menu, and a newer one replaces an
+  older one. It is unsigned, so Windows asks before running it. Or take the `.zip`, unpack it and run `plotextract.exe`:
+  nothing is installed.
+- **Linux:** the `.AppImage` is one file: make it executable (`chmod +x`) and run it. Or unpack the `.tar.gz` and run
+  `plotextract`. You need X11 or Wayland and a graphics driver.
+- **macOS:** unpack the `.tar.gz` for your processor. The app is unsigned: right-click it and choose Open the first
+  time.
 
 ## Opening a figure
 
@@ -120,7 +126,9 @@ cargo run --release -p plotextract -- plot.pdf
 cargo test --workspace
 ```
 
-`scripts/dist.ps1` (Windows) and `scripts/dist.sh` (Linux, macOS) build the release packages. How the program is put
+`scripts/dist.ps1` (Windows) and `scripts/dist.sh` (Linux, macOS) build the release packages; `scripts/installer.ps1`
+builds the Windows installer as well (with [WiX](https://wixtoolset.org) 5, from `wix/plotextract.wxs`) and
+`scripts/appimage.sh` the Linux AppImage. How the program is put
 together is in [docs/architecture.md](docs/architecture.md), and how it is tested in [docs/testing.md](docs/testing.md).
 What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 

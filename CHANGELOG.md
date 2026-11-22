@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.1
+
+The program is as in 1.2.0; there are two more ways to get it.
+
+### Added
+- **A Windows installer** (`plotextract-1.2.1-windows-x86_64.msi`). It puts plotextract in Program Files for all users,
+  with a Start menu shortcut and an entry in Apps and features to remove it by; a newer version replaces an older one in
+  place. It is built with WiX 5 from `wix/plotextract.wxs` by `scripts/installer.ps1`, and is unsigned. The zip is
+  still there for running without installing.
+- **A Linux AppImage** (`plotextract-1.2.1-linux-x86_64.AppImage`): one file to make executable and run, with the
+  desktop entry and the icon a launcher needs. `scripts/appimage.sh` builds it with appimagetool. It holds the program
+  only, so it needs what the plain package needs: X11 or Wayland and a graphics driver.
+- The release workflow builds both and attaches them to the GitHub release beside the archives.
+
 ## 1.2.0
 
 ### Added

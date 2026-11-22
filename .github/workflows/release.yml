@@ -58,16 +58,20 @@ jobs:
       matrix:
         include:
           # the oldest supported glibc: the Linux binary runs on anything newer
-          - { os: ubuntu-22.04, script: "bash scripts/dist.sh dist" }
+          # (each of the first and the last makes the plain package too: the archive, and an AppImage or an installer)
+          - { os: ubuntu-22.04, script: "bash scripts/appimage.sh dist" }
           - { os: macos-latest, script: "bash scripts/dist.sh dist" } # Apple silicon
           - { os: macos-15-intel, script: "bash scripts/dist.sh dist" } # Intel
-          - { os: windows-latest, script: "pwsh scripts/dist.ps1 -Out dist" }
+          - { os: windows-latest, script: "pwsh scripts/installer.ps1 -Out dist" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
+      - name: WiX, for the Windows installer
+        if: runner.os == 'Windows'
+        run: dotnet tool install --global wix --version 5.0.2
       - run: ${{ matrix.script }}
       - uses: actions/upload-artifact@v4
         with:
@@ -75,6 +79,8 @@ jobs:
           path: |
             dist/*.zip
             dist/*.tar.gz
+            dist/*.msi
+            dist/*.AppImage
 
   release:
     needs: [version, build]
