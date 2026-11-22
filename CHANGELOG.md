@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.2
+
+### Added
+- **A macOS disk image** for each processor (`plotextract-1.2.2-macos-aarch64.dmg`, `-macos-x86_64.dmg`): opened, it
+  shows the app beside a link to Applications, to drag it there. `scripts/dmg.sh` builds it with `hdiutil`, and the
+  release workflow attaches it beside the archive. The app in it is unsigned, as before.
+
 ## 1.2.1
 
 The program is as in 1.2.0; there are two more ways to get it.

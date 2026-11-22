@@ -58,10 +58,10 @@ jobs:
       matrix:
         include:
           # the oldest supported glibc: the Linux binary runs on anything newer
-          # (each of the first and the last makes the plain package too: the archive, and an AppImage or an installer)
+          # (each makes the plain package too: the archive, and an AppImage, a disk image or an installer)
           - { os: ubuntu-22.04, script: "bash scripts/appimage.sh dist" }
-          - { os: macos-latest, script: "bash scripts/dist.sh dist" } # Apple silicon
-          - { os: macos-15-intel, script: "bash scripts/dist.sh dist" } # Intel
+          - { os: macos-latest, script: "bash scripts/dmg.sh dist" } # Apple silicon
+          - { os: macos-15-intel, script: "bash scripts/dmg.sh dist" } # Intel
           - { os: windows-latest, script: "pwsh scripts/installer.ps1 -Out dist" }
     runs-on: ${{ matrix.os }}
     steps:
@@ -81,6 +81,7 @@ jobs:
             dist/*.tar.gz
             dist/*.msi
             dist/*.AppImage
+            dist/*.dmg
 
   release:
     needs: [version, build]

@@ -16,8 +16,8 @@ Get the package for your system from the [releases page](https://github.com/raja
   nothing is installed.
 - **Linux:** the `.AppImage` is one file: make it executable (`chmod +x`) and run it. Or unpack the `.tar.gz` and run
   `plotextract`. You need X11 or Wayland and a graphics driver.
-- **macOS:** unpack the `.tar.gz` for your processor. The app is unsigned: right-click it and choose Open the first
-  time.
+- **macOS:** open the `.dmg` for your processor (`aarch64` is Apple silicon, `x86_64` Intel) and drag plotextract onto
+  Applications. Or unpack the `.tar.gz`. The app is unsigned: right-click it and choose Open the first time.
 
 ## Opening a figure
 
@@ -128,7 +128,7 @@ cargo test --workspace
 
 `scripts/dist.ps1` (Windows) and `scripts/dist.sh` (Linux, macOS) build the release packages; `scripts/installer.ps1`
 builds the Windows installer as well (with [WiX](https://wixtoolset.org) 5, from `wix/plotextract.wxs`) and
-`scripts/appimage.sh` the Linux AppImage. How the program is put
+`scripts/appimage.sh` the Linux AppImage and `scripts/dmg.sh` the macOS disk image. How the program is put
 together is in [docs/architecture.md](docs/architecture.md), and how it is tested in [docs/testing.md](docs/testing.md).
 What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
