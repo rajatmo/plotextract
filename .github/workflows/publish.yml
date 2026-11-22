@@ -1,0 +1,51 @@
+name: publish
+
+# Publish a release for a tag that already exists, from the packages an earlier run of the release workflow built. It is
+# for a version whose packages were built but whose release was not made. Run it by hand with the tag (v1.2.1) and the
+# id of that run (the number in the run's address). The release is not marked as the latest.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to release, like v1.2.1. It must exist."
+        required: true
+      run_id:
+        description: "The id of the release run whose packages to attach"
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: packages
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          awk -v v="${TAG#v}" '
+            /^## / { on = ($2 == v); next }
+            on
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/CHANGELOG.md)." > notes.md
+          fi
+      - name: Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          ls -l packages
+          gh release create "$TAG" packages/* --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "$TAG" --notes-file notes.md --latest=false
